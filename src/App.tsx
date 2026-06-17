@@ -408,6 +408,39 @@ export default function App() {
   const [addUserSuccess, setAddUserSuccess] = useState<string>("");
   const [addUserError, setAddUserError] = useState<string>("");
 
+  // States to keep track of the registered users list in Firestore for Max (Master) panel
+  const [registeredUsersList, setRegisteredUsersList] = useState<any[]>([]);
+  const [isLoadingUsersList, setIsLoadingUsersList] = useState<boolean>(false);
+
+  const fetchRegisteredUsers = async () => {
+    setIsLoadingUsersList(true);
+    try {
+      const usersRef = collection(db, "users");
+      const snapshot = await getDocs(usersRef);
+      const list: any[] = [];
+      snapshot.forEach((d) => {
+        list.push({ uid: d.id, ...d.data() });
+      });
+      // Sort users alphabetically by name (userName)
+      list.sort((a, b) => {
+        const nameA = (a.userName || "").toLowerCase();
+        const nameB = (b.userName || "").toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+      setRegisteredUsersList(list);
+    } catch (err: any) {
+      console.error("Error fetching registered users for Max panel:", err);
+    } finally {
+      setIsLoadingUsersList(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && user.apellido === "max") {
+      fetchRegisteredUsers();
+    }
+  }, [user]);
+
   useEffect(() => {
     const initUser = async () => {
       setAuthLoading(true);
@@ -578,6 +611,9 @@ export default function App() {
       setNewUserPassword("");
       setNewUserAccountType("pago");
       setNewUserRoute("suave");
+
+      // Reload list automatically
+      fetchRegisteredUsers();
     } catch (err: any) {
       console.error("Error adding user to Firestore:", err);
       setAddUserError("Error al registrar en la base de datos de fe: " + err.message);
@@ -1308,16 +1344,18 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2 bg-[#FAF7F2] p-2 rounded-xl border border-[#EBE6DE] text-xs font-semibold">
-                  <span>Sendero: <strong className="text-[#5A6344] uppercase">{selectedRouteType}</strong></span>
-                  <button 
-                    onClick={() => setCurrentScreen("onboarding")} 
-                    className="text-[10px] bg-[#5A6344]/10 hover:bg-[#5A6344]/20 text-[#5A6344] py-1 px-1.5 rounded-md font-bold uppercase cursor-pointer transition-colors"
-                    title="Cambiar el sendero de entrenamiento"
-                  >
-                    Cambiar
-                  </button>
-                </div>
+                {user?.apellido !== "max" && (
+                  <div className="flex items-center gap-2 bg-[#FAF7F2] p-2 rounded-xl border border-[#EBE6DE] text-xs font-semibold">
+                    <span>Sendero: <strong className="text-[#5A6344] uppercase">{selectedRouteType}</strong></span>
+                    <button 
+                      onClick={() => setCurrentScreen("onboarding")} 
+                      className="text-[10px] bg-[#5A6344]/10 hover:bg-[#5A6344]/20 text-[#5A6344] py-1 px-1.5 rounded-md font-bold uppercase cursor-pointer transition-colors"
+                      title="Cambiar el sendero de entrenamiento"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                )}
                 
                 {showInstallBtn && (
                   <button 
@@ -1345,8 +1383,213 @@ export default function App() {
           </div>
 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-12">
+            {user?.apellido === "max" ? (
+              <div className="space-y-8 animate-in fade-in duration-300">
+                
+                {/* Header card for panel */}
+                <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xs border border-[#EBE6DE]">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-3xl">🛡️</span>
+                        <h2 className="text-xl md:text-2xl font-extrabold text-[#5A6344] tracking-tight">
+                          Directorio FuerteEnCristo
+                        </h2>
+                      </div>
+                      <p className="text-xs sm:text-sm text-slate-500 max-w-2xl leading-relaxed">
+                        Como administrador principal (Max), aquí puedes registrar nuevas personas, consultar sus claves secretas y verificar la vigencia de sus suscripciones de entrenamiento.
+                      </p>
+                    </div>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddUserSuccess("");
+                        setAddUserError("");
+                        setShowAddUserModal(true);
+                      }}
+                      className="w-full sm:w-auto bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] font-black text-sm px-6 py-4 rounded-2xl shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>🛡️ Registrar Nueva Persona</span>
+                    </button>
+                  </div>
+                </div>
 
-            {/* BIG PUNCHY CALL TO ACTION BAR TO TRIGGER THE GUIDED PLAYER SCREEN */}
+                {/* Statistics bento grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-xl border border-slate-100">👥</div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Registrados</span>
+                      <strong className="text-xl md:text-2xl font-black text-[#5A6344] block">
+                        {isLoadingUsersList ? "..." : registeredUsersList.length}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-xl border border-emerald-100">🟢</div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Usuarios de Pago</span>
+                      <strong className="text-xl md:text-2xl font-black text-emerald-700 block">
+                        {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "pago").length}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-50/50 flex items-center justify-center text-xl border border-amber-100">⏳</div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Pruebas Temporales</span>
+                      <strong className="text-xl md:text-2xl font-black text-amber-700 block">
+                        {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "prueba").length}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table containing the active members */}
+                <div className="bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE]">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-extrabold text-[#5A6344] text-xs sm:text-sm uppercase tracking-wider">
+                      Lista de Personas Registradas ({registeredUsersList.length})
+                    </h3>
+                    
+                    <button
+                      type="button"
+                      onClick={fetchRegisteredUsers}
+                      disabled={isLoadingUsersList}
+                      className="flex items-center gap-1.5 py-2 px-3 text-xs text-slate-500 hover:text-[#5A6344] bg-[#FAF7F2] border border-[#EBE6DE] rounded-xl font-bold cursor-pointer transition-all hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isLoadingUsersList ? "animate-spin" : ""}`} />
+                      <span>{isLoadingUsersList ? "Sincronizando..." : "Sincronizar Lista"}</span>
+                    </button>
+                  </div>
+
+                  {isLoadingUsersList && registeredUsersList.length === 0 ? (
+                    <div className="py-20 text-center text-slate-400 space-y-3">
+                      <div className="w-8 h-8 border-2 border-[#5A6344] border-t-transparent rounded-full animate-spin mx-auto"></div>
+                      <p className="text-xs font-semibold">Cargando base de datos de fe...</p>
+                    </div>
+                  ) : registeredUsersList.length === 0 ? (
+                    <div className="py-16 text-center text-slate-400">
+                      <span className="text-4xl block mb-2">⛪</span>
+                      <p className="text-xs font-semibold text-slate-500">Aún no hay hermanos cargados. ¡Registra al primero con el botón de arriba!</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {registeredUsersList.map((row, index) => {
+                        const isTrial = row.tipoCuenta === "prueba";
+                        
+                        // Vigencia helper
+                        let vigText = "Usuario Pago";
+                        let vigColor = "bg-emerald-50 text-emerald-800 border-emerald-200";
+                        if (isTrial) {
+                          if (row.fechaVencimiento) {
+                            const remains = row.fechaVencimiento - Date.now();
+                            if (remains <= 0) {
+                              vigText = "Prueba Vencida (Expirado)";
+                              vigColor = "bg-red-50 text-red-800 border-red-200";
+                            } else {
+                              const daysLeft = Math.ceil(remains / (24 * 60 * 60 * 1000));
+                              vigText = `Prueba Activa (${daysLeft} ${daysLeft === 1 ? "día" : "días"} restante)`;
+                              vigColor = "bg-amber-50 text-amber-800 border-amber-200 font-semibold";
+                            }
+                          } else {
+                            vigText = "Prueba Temporal (3 Días)";
+                            vigColor = "bg-amber-50 text-amber-800 border-amber-200";
+                          }
+                        }
+
+                        // Baseline path emoji helper
+                        let baselineRouteEmoji = "🛋️";
+                        let baselineRouteTitle = "Súper Suave";
+                        if (row.selectedRouteType === "rodillas") {
+                          baselineRouteEmoji = "🦵";
+                          baselineRouteTitle = "Rodillas e Impacto Cero";
+                        } else if (row.selectedRouteType === "fuerza") {
+                          baselineRouteEmoji = "🛡️";
+                          baselineRouteTitle = "Siervo Fuerte / General";
+                        } else if (row.selectedRouteType === "legendario") {
+                          baselineRouteEmoji = "🏔️";
+                          baselineRouteTitle = "Legendario (Montañismo)";
+                        }
+
+                        return (
+                          <div 
+                            key={row.uid || index}
+                            className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#EBE6DE] flex flex-col justify-between hover:border-slate-300 transition-colors"
+                          >
+                            <div>
+                              <div className="flex justify-between items-start gap-2 mb-3">
+                                <div>
+                                  <h4 className="font-extrabold text-base text-[#5A6344]">
+                                    {row.userName || "Hermano registrado"}
+                                  </h4>
+                                  <span className="text-[11px] text-slate-400 font-mono tracking-wider block mt-0.5">
+                                    Apellido: <strong className="text-slate-600 font-semibold uppercase">{row.apellido || "N/A"}</strong>
+                                  </span>
+                                </div>
+                                <span className={`text-[10px] px-2.5 py-1 font-extrabold rounded-full border ${vigColor}`}>
+                                  {vigText}
+                                </span>
+                              </div>
+
+                              <div className="space-y-2 mt-4 text-xs font-sans">
+                                <div className="flex items-center gap-1.5 p-2 bg-white rounded-xl border border-[#EBE6DE]">
+                                  <span className="text-slate-400 font-bold block shrink-0 text-[10px] uppercase">Clave:</span>
+                                  <code className="bg-slate-100 px-2 py-0.5 rounded font-mono font-bold text-[#8B6E4E]">{row.password || "Sin clave"}</code>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(row.password || "");
+                                      alert(`Clave "${row.password}" copiada para darle al hermano.`);
+                                    }}
+                                    className="ml-auto text-[10px] text-slate-400 hover:text-[#5A6344] focus:outline-none uppercase inline-flex items-center gap-0.5 font-bold cursor-pointer"
+                                    title="Copiar contraseña"
+                                  >
+                                    <span>Copiar</span>
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center justify-between text-xs text-slate-600">
+                                  <span className="font-semibold text-[10px] uppercase text-slate-400">Sendero Inicial:</span>
+                                  <span className="font-bold flex items-center gap-1 text-[#5A6344]">
+                                    <span>{baselineRouteEmoji}</span>
+                                    <span>{baselineRouteTitle}</span>
+                                  </span>
+                                </div>
+
+                                {row.fechaVencimiento && (
+                                  <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200/50 pt-2">
+                                    <span className="font-semibold text-[10px] uppercase text-slate-400">Expiración:</span>
+                                    <span className="font-bold text-slate-700">
+                                      {new Date(row.fechaVencimiento).toLocaleDateString()}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex justify-between items-center text-[10px] text-slate-400 mt-4 border-t border-slate-200/50 pt-3 font-mono">
+                              <span>Socio ID: {row.uid ? row.uid.substring(0, 12) : "directo"}</span>
+                              <span>
+                                {row.updatedAt 
+                                  ? `Registro: ${new Date(row.updatedAt.seconds ? row.updatedAt.seconds * 1000 : (row.updatedAt._seconds ? row.updatedAt._seconds * 1000 : row.updatedAt)).toLocaleDateString()}`
+                                  : "Seeding"}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            ) : (
+              <>
+                {/* BIG PUNCHY CALL TO ACTION BAR TO TRIGGER THE GUIDED PLAYER SCREEN */}
             <div className="mb-8 bg-gradient-to-r from-[#5A6344] to-[#484f36] rounded-3xl p-6 md:p-8 text-white shadow-lg flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden">
               <span className="absolute top-2 right-4 text-9xl opacity-10 select-none font-serif font-bold italic">FC</span>
               
@@ -1645,8 +1888,10 @@ export default function App() {
               </section>
 
             </div>
+          </>
+        )}
 
-          </div>
+      </div>
 
           {/* Footer content */}
           <footer className="bg-white border-t border-[#D9D3C7] py-12 mt-12 text-center text-slate-500">
