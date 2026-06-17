@@ -27,7 +27,8 @@ import {
   LogOut,
   Eye,
   EyeOff,
-  Download
+  Download,
+  Copy
 } from "lucide-react";
 import { WeeklyDayPlan, ExerciseItem, TodayWorkout, PalabraDeFe, PersonalFitnessPlan } from "./types";
 import { ROUTINES_BY_ROUTE_AND_DAY } from "./routines";
@@ -327,6 +328,20 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState<boolean>(false);
   const [showInstallHelp, setShowInstallHelp] = useState<boolean>(false);
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
+
+  const handleCopyLink = () => {
+    // Try to copy the correct address, fallback to a neat string or direct URL
+    const cleanUrl = window.location.href;
+    navigator.clipboard.writeText(cleanUrl)
+      .then(() => {
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 3000);
+      })
+      .catch((err) => {
+        console.error("Failed to copy link: ", err);
+      });
+  };
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
@@ -1653,35 +1668,66 @@ export default function App() {
       {/* ----------------- PWA MANUAL INSTALL INSTRUCTIONS MODAL ----------------- */}
       {showInstallHelp && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border border-[#EBE6DE] animate-in fade-in zoom-in-95 duration-150">
-            <div className="text-center mb-6">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border border-[#EBE6DE] animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="text-center mb-5">
               <span className="text-4xl">📲</span>
               <h3 className="text-xl md:text-2xl font-extrabold text-[#5A6344] mt-3">Instalar Fuerte en Cristo</h3>
-              <p className="text-xs text-slate-500 mt-1">Cómo tener la app en tu pantalla de inicio o escritorio</p>
+              <p className="text-xs text-slate-500 mt-1">Cómo tener la app con icono en tu pantalla de inicio o escritorio</p>
             </div>
 
-            <div className="space-y-4 text-sm text-slate-700 leading-relaxed font-sans">
+            {/* Crucial Context/Iframe Alert */}
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl mb-4 text-xs text-slate-700 leading-relaxed">
+              <div className="flex gap-2 items-start">
+                <span className="text-lg">⚠️</span>
+                <div>
+                  <strong className="text-amber-800 font-bold block mb-0.5">¿Estás en WhatsApp, Instagram o en la vista previa?</strong>
+                  Los botones de instalación rápida **no funcionan** dentro de marcos o navegadores internos (como las vistas previas de chats o de AI Studio). 
+                  ¡Es súper fácil de resolver! Copia el enlace abajo y pégalo directamente en **Google Chrome** (Android) o **Safari** (iPhone).
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className="mt-3 w-full flex items-center justify-center gap-2 py-2 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs font-black rounded-xl shadow-xs transition-all cursor-pointer active:scale-95"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>{copiedLink ? "¡ENLACE COPIADO! 📋 Pégalo en tu navegador" : "COPIAR ENLACE DE LA APP"}</span>
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed font-sans">
               
               <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#EBE6DE]">
-                <strong className="block text-[#8B6E4E] text-xs font-bold uppercase mb-1">En Google Chrome / Edge (PC o Android)</strong>
-                <p className="text-xs">
-                  Haz clic en el icono de descargas <Download className="w-3.5 h-3.5 inline text-amber-600" /> en la barra de direcciones superior (en PC), o abre el menú de tres puntos <strong className="font-bold">⋮</strong> y selecciona <strong className="font-semibold">"Instalar aplicación"</strong> o <strong className="font-semibold">"Agregar a la pantalla principal"</strong>.
+                <strong className="block text-[#5A6344] text-[11px] font-bold uppercase mb-1">Celulares Android (Google Chrome)</strong>
+                <p className="text-[11px] text-slate-600">
+                  Una vez que estés en el navegador Chrome real:
+                  <br />
+                  1. Toca los tres puntos <strong className="font-bold">⋮</strong> arriba a la derecha.
+                  <br />
+                  2. Elige <strong className="font-semibold">"Instalar aplicación"</strong> o <strong className="font-semibold">"Agregar a la pantalla principal"</strong>.
                 </p>
               </div>
 
               <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#EBE6DE]">
-                <strong className="block text-[#8B6E4E] text-xs font-bold uppercase mb-1">En iPhone y iPad (Safari)</strong>
-                <p className="text-xs">
-                  Toca el botón de compartir 📤 en la parte de abajo de Safari, desplázate por la lista hacia abajo y dale clic a <strong className="font-semibold">"Agregar al inicio"</strong> o <strong className="font-semibold">"Add to Home Screen"</strong>. ¡Es facilísimo!
+                <strong className="block text-[#8B6E4E] text-[11px] font-bold uppercase mb-1">iPhone e iPad (Safari)</strong>
+                <p className="text-[11px] text-slate-600">
+                  Apple no permite la instalación automática desde la página web, debes hacerlo manualmente:
+                  <br />
+                  1. Abre el enlace en el navegador **Safari**.
+                  <br />
+                  2. Toca el botón **Compartir** 📤 (el cuadro con flecha arriba en la barra inferior).
+                  <br />
+                  3. Selecciona la opción <strong className="font-semibold text-amber-800">"Agregar al inicio"</strong> o <strong className="font-semibold text-amber-800">"Add to Home Screen"</strong>.
                 </p>
               </div>
 
               <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#EBE6DE]">
-                <strong className="block text-[#8B6E4E] text-xs font-bold uppercase mb-1">Ventajas de tener la App instalada</strong>
-                <ul className="list-disc pl-4 text-xs space-y-1 mt-1 font-medium text-slate-600">
-                  <li>Acceso directo con un lindo icono en tu celular o computadora.</li>
-                  <li>Inicia más rápido y aprovecha toda la pantalla (sin la barra superior).</li>
-                  <li>Mejor velocidad cargando tus ejercicios de fe y fitness.</li>
+                <strong className="block text-[#8B6E4E] text-[11px] font-bold uppercase mb-1">Ventajas de tener la App instalada</strong>
+                <ul className="list-disc pl-4 text-[10px] space-y-0.5 mt-1 font-medium text-slate-600">
+                  <li>Un hermoso icono en tu pantalla sin ocupar espacio de almacenamiento.</li>
+                  <li>Inicios súper rápidos sin las barras ni pestañas del navegador.</li>
+                  <li>Mayor fluidez para realizar tus rutinas diarias de fe y fitness.</li>
                 </ul>
               </div>
 
@@ -1690,7 +1736,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setShowInstallHelp(false)}
-              className="mt-6 w-full bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] font-extrabold text-base py-3 rounded-2xl shadow-md transition-all cursor-pointer text-center"
+              className="mt-5 w-full bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] font-extrabold text-sm py-2.5 rounded-2xl shadow-md transition-all cursor-pointer text-center"
             >
               ¡Entendido, muchas gracias!
             </button>
