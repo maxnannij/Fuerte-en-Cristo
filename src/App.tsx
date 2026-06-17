@@ -1317,13 +1317,13 @@ export default function App() {
                   >
                     <CheckCircle2 className="w-5 h-5" /> Regresar al Plan Semanal
                   </button>
-                  <button
+                 {/* <button
                     type="button"
                     onClick={handleRestartAll}
                     className="bg-[#F3F1ED] hover:bg-slate-200 text-slate-800 font-bold text-xs px-5 py-3 rounded-xl cursor-pointer transition-all"
                   >
                     Salir al Inicio
-                  </button>
+                  </button>*/}
                 </div>
               </div>
             ) : (
