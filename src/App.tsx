@@ -32,9 +32,8 @@ import {
 } from "lucide-react";
 import { WeeklyDayPlan, ExerciseItem, TodayWorkout, PalabraDeFe, PersonalFitnessPlan } from "./types";
 import { ROUTINES_BY_ROUTE_AND_DAY } from "./routines";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User as FirebaseUser } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { auth, normalizeLastNameToEmail, db } from "./firebase";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
+import { db } from "./firebase";
 
 // PRE-DEFINED OFFLINE PROGRAMS (No AI API call needed, completely immediate & secure)
 const PROGRAM_SUPER_SUAVE: PersonalFitnessPlan = {
@@ -399,89 +398,89 @@ export default function App() {
   const [userName, setUserName] = useState<string>("");
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        // Automatically compute userName from email or display name
-        const emailPrefix = currentUser.email ? currentUser.email.split("@")[0] : "";
-        const capitalName = emailPrefix 
-          ? "Hno. " + emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1) 
-          : "Hermano";
-        setUserName(capitalName);
+    const initUser = async () => {
+      setAuthLoading(true);
 
-        // Load saved route and configuration from Firestore first, fallback to localStorage
+      // Quietly seed default Perez/fiel123 user on mount so it's always available out-of-the-box
+      try {
+        const defaultUserRef = doc(db, "users", "perez");
+        const docSnap = await getDoc(defaultUserRef);
+        if (!docSnap.exists()) {
+          console.log("Seeding default user 'perez' into Firestore...");
+          await setDoc(defaultUserRef, {
+            apellido: "perez",
+            password: "fiel123",
+            userName: "Hermano Pérez",
+            selectedRouteType: "suave",
+            checkedExercises: {},
+            lastLoginDate: "",
+            updatedAt: serverTimestamp()
+          });
+          console.log("Default user 'perez' successfully seeded!");
+        }
+      } catch (err) {
+        console.warn("Could not seed default user (this is normal):", err);
+      }
+
+      // Check if user session is cached in local storage for instant start
+      const savedUserStr = localStorage.getItem("fiel_custom_user");
+      if (savedUserStr) {
         try {
-          const userDocRef = doc(db, "users", currentUser.uid);
-          const userDocSnap = await getDoc(userDocRef);
-          
-          if (userDocSnap.exists()) {
-            const data = userDocSnap.data();
-            console.log("Loaded user data from Firestore:", data);
-            
-            if (data.userName) {
-              setUserName(data.userName);
-            }
-            if (data.selectedRouteType && ["suave", "rodillas", "fuerza", "legendario"].includes(data.selectedRouteType)) {
-              setSelectedRouteType(data.selectedRouteType as any);
-              setCurrentScreen("dashboard");
-            } else {
-              setCurrentScreen("landing");
-            }
-            if (data.checkedExercises) {
-              setCheckedExercises(data.checkedExercises);
-            }
-          } else {
-            // No custom data in Firestore yet; check localStorage for backwards compatibility
-            const savedRoute = localStorage.getItem(`fiel_selected_route_${currentUser.uid}`);
-            const localChecked = localStorage.getItem(`fiel_checked_${currentUser.uid}`);
-            
-            const initialRoute = (savedRoute && ["suave", "rodillas", "fuerza", "legendario"].includes(savedRoute))
-              ? (savedRoute as any) 
-              : "suave";
-              
-            const initialChecked = localChecked ? JSON.parse(localChecked) : {};
-            
-            setSelectedRouteType(initialRoute);
-            setCheckedExercises(initialChecked);
-            
-            // Backpopulate to Firestore so they are initialized in the cloud
-            await setDoc(userDocRef, {
-              userName: capitalName,
-              selectedRouteType: initialRoute,
-              checkedExercises: initialChecked,
-              lastLoginDate: "",
-              updatedAt: serverTimestamp()
-            }, { merge: true });
-            
-            if (savedRoute) {
-              setCurrentScreen("dashboard");
-            } else {
-              setCurrentScreen("landing");
-            }
+          const localUser = JSON.parse(savedUserStr);
+          setUser(localUser);
+          if (localUser.userName) {
+            setUserName(localUser.userName);
           }
-        } catch (err) {
-          console.error("Error reading from Firestore upon login:", err);
-          // Standard offline fallback
-          const savedRoute = localStorage.getItem(`fiel_selected_route_${currentUser.uid}`);
-          if (savedRoute && ["suave", "rodillas", "fuerza", "legendario"].includes(savedRoute)) {
-            setSelectedRouteType(savedRoute as any);
+          if (localUser.selectedRouteType && ["suave", "rodillas", "fuerza", "legendario"].includes(localUser.selectedRouteType)) {
+            setSelectedRouteType(localUser.selectedRouteType);
             setCurrentScreen("dashboard");
           } else {
-            setCurrentScreen("landing");
+            setCurrentScreen("onboarding");
           }
-          const localChecked = localStorage.getItem(`fiel_checked_${currentUser.uid}`);
-          if (localChecked) {
-            setCheckedExercises(JSON.parse(localChecked));
+          if (localUser.checkedExercises) {
+            setCheckedExercises(localUser.checkedExercises);
           }
+          setAuthLoading(false);
+
+          // Background sync from Firestore to retrieve any updates
+          try {
+            const userDocRef = doc(db, "users", localUser.uid);
+            const userDocSnap = await getDoc(userDocRef);
+            if (userDocSnap.exists()) {
+              const data = userDocSnap.data();
+              console.log("Background synced fresh user data from Firestore:", data);
+              
+              const updatedUser = { ...localUser, ...data, uid: localUser.uid };
+              setUser(updatedUser);
+              localStorage.setItem("fiel_custom_user", JSON.stringify(updatedUser));
+
+              if (data.userName) {
+                setUserName(data.userName);
+              }
+              if (data.selectedRouteType && ["suave", "rodillas", "fuerza", "legendario"].includes(data.selectedRouteType)) {
+                setSelectedRouteType(data.selectedRouteType as any);
+                setCurrentScreen("dashboard");
+              }
+              if (data.checkedExercises) {
+                setCheckedExercises(data.checkedExercises);
+              }
+            }
+          } catch (syncErr) {
+            console.error("Error doing background sync from Firestore:", syncErr);
+          }
+        } catch (e) {
+          console.error("Error loading user credentials:", e);
+          setAuthLoading(false);
         }
       } else {
-        setCheckedExercises({});
+        // No cached session, show the intro landing screen
+        setCurrentScreen("landing");
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+    };
 
+    initUser();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -492,20 +491,72 @@ export default function App() {
     setLoginError("");
     setIsLoggingIn(true);
     try {
-      const email = normalizeLastNameToEmail(loginLastName);
-      console.log("Attempting login as email:", email);
-      await signInWithEmailAndPassword(auth, email, loginPassword);
+      const normalizedQueryLastName = loginLastName
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      
+      console.log("Querying users collection in Firestore for matches on apellido:", normalizedQueryLastName);
+      
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, where("apellido", "==", normalizedQueryLastName));
+      const querySnapshot = await getDocs(q);
+      
+      let matchedDoc: any = null;
+      let matchedId = "";
+      
+      if (!querySnapshot.empty) {
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.password && String(data.password).trim() === loginPassword.trim()) {
+            matchedDoc = data;
+            matchedId = doc.id;
+          }
+        });
+      } else {
+        // Broad search fallback (scan-casing offline backup)
+        const allQuery = await getDocs(usersRef);
+        allQuery.forEach((doc) => {
+          const data = doc.data();
+          const dbApellido = data.apellido 
+            ? String(data.apellido).trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+            : "";
+          if (dbApellido === normalizedQueryLastName && data.password && String(data.password).trim() === loginPassword.trim()) {
+            matchedDoc = data;
+            matchedId = doc.id;
+          }
+        });
+      }
+
+      if (!matchedDoc) {
+        setLoginError("Apellido o clave incorrectos. Verifique sus datos o consulte al instructor del templo.");
+        setIsLoggingIn(false);
+        return;
+      }
+
+      const customUser = { uid: matchedId, ...matchedDoc };
+      setUser(customUser);
+      localStorage.setItem("fiel_custom_user", JSON.stringify(customUser));
+
+      if (customUser.userName) {
+        setUserName(customUser.userName);
+      }
+      
+      if (customUser.selectedRouteType && ["suave", "rodillas", "fuerza", "legendario"].includes(customUser.selectedRouteType)) {
+        setSelectedRouteType(customUser.selectedRouteType);
+        setCurrentScreen("dashboard");
+      } else {
+        setCurrentScreen("onboarding");
+      }
+
+      if (customUser.checkedExercises) {
+        setCheckedExercises(customUser.checkedExercises);
+      }
+
     } catch (error: any) {
       console.error("Login verification failed:", error);
-      let errMsg = "Su Apellido o la contraseña son incorrectas. Por favor verifique o consulte con su instructor de la iglesia.";
-      if (error.code === "auth/invalid-credential" || error.code === "auth/user-not-found" || error.code === "auth/wrong-password") {
-        errMsg = "Apellido o clave incorrectos. Verifique sus datos o consulte al instructor.";
-      } else if (error.code === "auth/invalid-email") {
-        errMsg = "Formato no válido. Escriba solo su Apellido paterno en letras.";
-      } else if (error.code === "auth/network-request-failed") {
-        errMsg = "Error de red. Verifique su conexión de Internet.";
-      }
-      setLoginError(errMsg);
+      setLoginError("Error de comunicación con el templo. Verifique su conexión de Internet o intente más tarde.");
     } finally {
       setIsLoggingIn(false);
     }
@@ -513,7 +564,8 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      localStorage.removeItem("fiel_custom_user");
+      setUser(null);
       setLoginLastName("");
       setLoginPassword("");
       setLoginError("");
@@ -537,6 +589,11 @@ export default function App() {
           updatedAt: serverTimestamp()
         }, { merge: true });
         console.log("Successfully updated route & userName in Firestore:", route, userName);
+        
+        // Cache the updated user object so subsequent PWA restarts remember it perfectly!
+        const updatedUser = { ...user, selectedRouteType: route, userName: userName };
+        localStorage.setItem("fiel_custom_user", JSON.stringify(updatedUser));
+        setUser(updatedUser);
       } catch (err) {
         console.error("Error saving user route to Firestore:", err);
       }

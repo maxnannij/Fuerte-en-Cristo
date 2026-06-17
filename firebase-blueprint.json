@@ -10,6 +10,14 @@
               "type": "string",
               "description": "Nombre de fe o de pila del usuario."
             },
+            "apellido": {
+              "type": "string",
+              "description": "Apellido paterno del usuario en minúsculas para inicio de sesión."
+            },
+            "password": {
+              "type": "string",
+              "description": "Clave secreta de acceso del usuario."
+            },
             "selectedRouteType": {
               "type": "string",
               "description": "Tipo de sendero elegido (suave, rodillas, fuerza, legendario)."
