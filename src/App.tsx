@@ -298,6 +298,12 @@ const PROGRAM_LEGENDARIO: PersonalFitnessPlan = {
   notaSugiereMedico: "Nota para montañistas: Preste suma atención a su respiración a altitudes elevadas, use calzado de buen agarre y nunca camine solo."
 };
 
+const getSpanishDayName = (): string => {
+  const days = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  const dayIndex = new Date().getDay();
+  return days[dayIndex];
+};
+
 export default function App() {
   // Firebase Auth states
   const [user, setUser] = useState<any>(null);
@@ -328,11 +334,21 @@ export default function App() {
           ? "Hno. " + emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1) 
           : "Hermano";
         setUserName(capitalName);
+
+        // Load saved route
+        const savedRoute = localStorage.getItem(`fiel_selected_route_${currentUser.uid}`);
+        if (savedRoute && ["suave", "rodillas", "fuerza", "legendario"].includes(savedRoute)) {
+          setSelectedRouteType(savedRoute as any);
+          setCurrentScreen("dashboard");
+        } else {
+          setCurrentScreen("landing");
+        }
       }
       setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
+
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -376,11 +392,22 @@ export default function App() {
 
   const [selectedRouteType, setSelectedRouteType] = useState<"suave" | "rodillas" | "fuerza" | "legendario">("suave");
 
-  // Plan mapping state based on selection
+  const handleSelectRoute = (route: "suave" | "rodillas" | "fuerza" | "legendario") => {
+    setSelectedRouteType(route);
+    if (user) {
+      localStorage.setItem(`fiel_selected_route_${user.uid}`, route);
+    }
+  };
+
+  // State for scolding due to missed days ("regaño")
+  const [missedDaysCount, setMissedDaysCount] = useState<number>(0);
+  const [showRegaño, setShowRegaño] = useState<boolean>(false);
+
+  // Set the plan based on selected path
   const [activePlan, setActivePlan] = useState<PersonalFitnessPlan>(PROGRAM_SUPER_SUAVE);
 
-  // Active state in Dashboard
-  const [selectedDay, setSelectedDay] = useState<string>("Lunes");
+  // Active state in Dashboard initialized to today's day
+  const [selectedDay, setSelectedDay] = useState<string>(() => getSpanishDayName());
   const [checkedExercises, setCheckedExercises] = useState<Record<string, boolean>>({});
 
   // Active state in full-screen guided "Player" mode
@@ -391,6 +418,54 @@ export default function App() {
   // Quick Rest Timer
   const [restSeconds, setRestSeconds] = useState<number | null>(null);
   const [restTimerId, setRestTimerId] = useState<any>(null);
+
+  // Calculate missed days when user changes
+  useEffect(() => {
+    if (user) {
+      // Get local YYYY-MM-DD date string
+      const dateObj = new Date();
+      const localYear = dateObj.getFullYear();
+      const localMonth = String(dateObj.getMonth() + 1).padStart(2, "0");
+      const localDay = String(dateObj.getDate()).padStart(2, "0");
+      const todayStr = `${localYear}-${localMonth}-${localDay}`;
+      
+      const lastLoginStr = localStorage.getItem(`fiel_last_login_date_${user.uid}`);
+      
+      console.log("Checking login date streak logic. Last login:", lastLoginStr, "Today:", todayStr);
+      
+      if (lastLoginStr) {
+        if (lastLoginStr !== todayStr) {
+          const lastDate = new Date(lastLoginStr + "T00:00:00");
+          const todayDate = new Date(todayStr + "T00:00:00");
+          
+          let count = 0;
+          const tempDate = new Date(lastDate.getTime());
+          
+          while (true) {
+            tempDate.setDate(tempDate.getDate() + 1);
+            if (tempDate.getTime() >= todayDate.getTime()) {
+              break;
+            }
+            // 0 represents Sunday
+            if (tempDate.getDay() !== 0) {
+              count++;
+            }
+          }
+          
+          if (count > 0) {
+            setMissedDaysCount(count);
+            setShowRegaño(true);
+          }
+          
+          // Update last login to today
+          localStorage.setItem(`fiel_last_login_date_${user.uid}`, todayStr);
+        }
+      } else {
+        // First login: register today so tracking starts tomorrow
+        localStorage.setItem(`fiel_last_login_date_${user.uid}`, todayStr);
+      }
+    }
+  }, [user]);
 
   // Set the plan based on selected path
   useEffect(() => {
@@ -665,7 +740,11 @@ export default function App() {
               <p className="text-sm text-slate-500 mt-1">Ingresa tus datos con confianza. No los compartiremos con nadie externa.</p>
             </div>
 
-            <form onSubmit={(e) => { e.preventDefault(); setCurrentScreen("dashboard"); }} className="space-y-6">
+            <form onSubmit={(e) => { 
+              e.preventDefault(); 
+              handleSelectRoute(selectedRouteType);
+              setCurrentScreen("dashboard"); 
+            }} className="space-y-6">
               
               {/* Name */}
               <div>
@@ -821,6 +900,17 @@ export default function App() {
                     Editar
                   </button>
                 </div>
+
+                <div className="flex items-center gap-2 bg-[#FAF7F2] p-2 rounded-xl border border-[#EBE6DE] text-xs font-semibold">
+                  <span>Sendero: <strong className="text-[#5A6344] uppercase">{selectedRouteType}</strong></span>
+                  <button 
+                    onClick={() => setCurrentScreen("onboarding")} 
+                    className="text-[10px] bg-[#5A6344]/10 hover:bg-[#5A6344]/20 text-[#5A6344] py-1 px-1.5 rounded-md font-bold uppercase cursor-pointer transition-colors"
+                    title="Cambiar el sendero de entrenamiento"
+                  >
+                    Cambiar
+                  </button>
+                </div>
                 
                 <button 
                   onClick={handleLogout}
@@ -874,6 +964,39 @@ export default function App() {
               </div>
             </div>
 
+            {/* PASTORAL SCOLDING BOX ("REGAÑO") */}
+            {showRegaño && missedDaysCount > 0 && (
+              <div className="mb-6 p-5 bg-amber-50/70 border-2 border-dashed border-[#D9B99B] rounded-3xl text-[#5A4B3A] shadow-xs relative overflow-hidden animate-shake">
+                <div className="absolute top-[-20%] right-[-10%] w-[120px] h-[120px] bg-[#D9B99B]/10 rounded-full blur-xl pointer-events-none" />
+                <div className="flex gap-4 items-start z-10 relative">
+                  <span className="text-3xl shrink-0">🐑</span>
+                  <div className="flex-1">
+                    <h4 className="font-extrabold text-xs sm:text-sm text-[#8B6E4E] uppercase tracking-wider flex items-center gap-2">
+                      ¡Llamado Pastoral a la Disciplina! 
+                      <span className="text-[10px] bg-[#8B6E4E]/10 text-[#8B6E4E] px-2 py-0.5 rounded-full font-bold">
+                        {missedDaysCount === 1 ? "1 Día ausente" : `${missedDaysCount} Días ausentes`}
+                      </span>
+                    </h4>
+                    <p className="text-xs mt-1.5 leading-relaxed font-serif italic text-slate-700">
+                      "Hno/a. {userName || "Fiel"}, hemos notado que faltaste a tu templo corporal por {missedDaysCount === 1 ? "un día" : `${missedDaysCount} días`} de ejercicio previstos. 
+                      Recuerda que de Lunes a Sábado entrenamos el cuerpo que el Señor nos prestó para servirle con gozo y perseverancia. 
+                      El Domingo tienes tu descanso libre bien merecido para regocijar el alma, ¡pero los demás días hay que sudar la gota gorda con fe!"
+                    </p>
+                    <p className="text-[11px] font-bold text-[#5A6344] mt-2 font-sans uppercase tracking-wide">
+                      — Tu instructor de salud de la iglesia
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => setShowRegaño(false)} 
+                    className="text-xs text-slate-400 hover:text-slate-600 font-bold p-1 px-2 bg-white rounded-lg border border-slate-200 shadow-2xs hover:shadow-xs transition-all shrink-0 cursor-pointer"
+                    title="Aceptar regaño y entrenar"
+                  >
+                    Entendido, ¡voy a entrenar!
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* BENTO GRID INTERACTIVE BODY */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
               
@@ -892,6 +1015,7 @@ export default function App() {
                       const isSelected = selectedDay === item.dia;
                       const isSunday = item.dia.toLowerCase() === "domingo";
                       const isSaturday = item.dia.toLowerCase() === "sábado" || item.dia.toLowerCase() === "sabado";
+                      const isToday = getSpanishDayName() === item.dia;
                       
                       let dayStyle = "bg-[#F3F1ED] text-slate-800 border-transparent hover:bg-slate-200/60";
                       if (isSelected) {
@@ -902,14 +1026,30 @@ export default function App() {
                         dayStyle = "bg-[#5A6344]/10 text-[#5A6344] border border-[#5A6344]/20 hover:bg-[#5A6344]/15";
                       }
 
+                      let heartbeatClass = "";
+                      if (isToday) {
+                        heartbeatClass = "animate-heartbeat ring-2 ring-[#5A6344]/40";
+                        if (isSelected) {
+                          heartbeatClass = "animate-heartbeat ring-2 ring-[#D9B99B]";
+                        }
+                      }
+
                       return (
                         <div
                           key={index}
                           onClick={() => setSelectedDay(item.dia)}
-                          className={`p-3 rounded-2xl cursor-pointer transition-all flex justify-between items-center ${dayStyle}`}
+                          className={`p-3 rounded-2xl cursor-pointer transition-all flex justify-between items-center ${dayStyle} ${heartbeatClass}`}
                         >
                           <div>
-                            <span className="text-xs font-bold block">{item.dia}</span>
+                            <span className="text-xs font-bold block flex items-center gap-1.5">
+                              {item.dia} 
+                              {isToday && (
+                                <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-0.5 shadow-2xs">
+                                  <span>HOY</span>
+                                  <span>❤️</span>
+                                </span>
+                              )}
+                            </span>
                             <span className="text-[11px] block opacity-95 text-xs line-clamp-1 mt-0.5">{item.tipoActividad}</span>
                           </div>
                           <span className="text-[10px] opacity-75 font-mono">
@@ -984,14 +1124,26 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                <div className="mt-6 pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-2 items-center justify-between text-xs text-slate-500">
                   <span>Presiona los círculos para marcar tus completados manuales</span>
-                  <button 
-                    onClick={() => setCheckedExercises({})}
-                    className="text-[#8B6E4E] hover:underline font-bold uppercase text-[10px]"
-                  >
-                    Reset Checkboxes
-                  </button>
+                  <div className="flex gap-2 items-center">
+                    <button 
+                      onClick={() => {
+                        setMissedDaysCount(2);
+                        setShowRegaño(true);
+                      }}
+                      className="text-[#8B6E4E] hover:text-[#725a40] font-bold text-[10px] bg-[#FAF7F2] border border-[#EBE6DE] px-2 py-1 rounded-lg cursor-pointer transition-colors"
+                      title="Simular que te ausentaste por 2 días de entrenamiento"
+                    >
+                      🧪 Probar Regaño
+                    </button>
+                    <button 
+                      onClick={() => setCheckedExercises({})}
+                      className="text-[#8B6E4E] hover:underline font-bold uppercase text-[10px] cursor-pointer"
+                    >
+                      Reset Checkboxes
+                    </button>
+                  </div>
                 </div>
               </section>
 
