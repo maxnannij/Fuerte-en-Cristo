@@ -397,11 +397,22 @@ export default function App() {
   // Profile settings (safe local storage / default fallback)
   const [userName, setUserName] = useState<string>("");
 
+  // Master Administrator panel states (Only for Max / master!!!)
+  const [showAddUserModal, setShowAddUserModal] = useState<boolean>(false);
+  const [newUserApellido, setNewUserApellido] = useState<string>("");
+  const [newUserName, setNewUserName] = useState<string>("");
+  const [newUserPassword, setNewUserPassword] = useState<string>("");
+  const [newUserAccountType, setNewUserAccountType] = useState<"prueba" | "pago">("pago");
+  const [newUserRoute, setNewUserRoute] = useState<"suave" | "rodillas" | "fuerza" | "legendario">("suave");
+  const [isAddingUser, setIsAddingUser] = useState<boolean>(false);
+  const [addUserSuccess, setAddUserSuccess] = useState<string>("");
+  const [addUserError, setAddUserError] = useState<string>("");
+
   useEffect(() => {
     const initUser = async () => {
       setAuthLoading(true);
 
-      // Quietly seed default Perez/fiel123 user on mount so it's always available out-of-the-box
+      // Quietly seed default users on mount so they're always available out-of-the-box
       try {
         const defaultUserRef = doc(db, "users", "perez");
         const docSnap = await getDoc(defaultUserRef);
@@ -414,12 +425,30 @@ export default function App() {
             selectedRouteType: "suave",
             checkedExercises: {},
             lastLoginDate: "",
+            tipoCuenta: "pago",
             updatedAt: serverTimestamp()
           });
           console.log("Default user 'perez' successfully seeded!");
         }
+
+        const masterUserRef = doc(db, "users", "max");
+        const masterSnap = await getDoc(masterUserRef);
+        if (!masterSnap.exists()) {
+          console.log("Seeding Master user 'max' into Firestore...");
+          await setDoc(masterUserRef, {
+            apellido: "max",
+            password: "master!!!",
+            userName: "Max",
+            selectedRouteType: "fuerza",
+            checkedExercises: {},
+            lastLoginDate: "",
+            tipoCuenta: "pago",
+            updatedAt: serverTimestamp()
+          });
+          console.log("Master user 'max' successfully seeded!");
+        }
       } catch (err) {
-        console.warn("Could not seed default user (this is normal):", err);
+        console.warn("Could not seed default users:", err);
       }
 
       // Check if user session is cached in local storage for instant start
@@ -427,6 +456,18 @@ export default function App() {
       if (savedUserStr) {
         try {
           const localUser = JSON.parse(savedUserStr);
+
+          // Check expiration for trial/prueba accounts
+          if (localUser.tipoCuenta === "prueba" && localUser.fechaVencimiento && Date.now() > localUser.fechaVencimiento) {
+            console.warn("Trial user has expired.");
+            localStorage.removeItem("fiel_custom_user");
+            setUser(null);
+            setCurrentScreen("landing");
+            setLoginError("Su cuenta de prueba de 3 días ha vencido. Comuníquese con el instructor Max para renovar su acceso completo.");
+            setAuthLoading(false);
+            return;
+          }
+
           setUser(localUser);
           if (localUser.userName) {
             setUserName(localUser.userName);
@@ -450,6 +491,15 @@ export default function App() {
               const data = userDocSnap.data();
               console.log("Background synced fresh user data from Firestore:", data);
               
+              // Double check trial expiration on fresh synched data too
+              if (data.tipoCuenta === "prueba" && data.fechaVencimiento && Date.now() > data.fechaVencimiento) {
+                localStorage.removeItem("fiel_custom_user");
+                setUser(null);
+                setCurrentScreen("landing");
+                setLoginError("Su cuenta de prueba de 3 días ha vencido. Comuníquese con el instructor Max para renovar su acceso completo.");
+                return;
+              }
+
               const updatedUser = { ...localUser, ...data, uid: localUser.uid };
               setUser(updatedUser);
               localStorage.setItem("fiel_custom_user", JSON.stringify(updatedUser));
@@ -481,6 +531,60 @@ export default function App() {
 
     initUser();
   }, []);
+
+  const handleAddUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddUserSuccess("");
+    setAddUserError("");
+    
+    if (!newUserApellido.trim() || !newUserName.trim() || !newUserPassword.trim()) {
+      setAddUserError("Por favor complete todos los datos obligatorios.");
+      return;
+    }
+
+    setIsAddingUser(true);
+    try {
+      const normalizedNewApellido = newUserApellido
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+
+      // We use a safe generated ID for uniqueness to avoid same last name document collisions!
+      const uniqueDocId = `${normalizedNewApellido}_${Math.random().toString(36).substring(2, 6)}`;
+      const userDocRef = doc(db, "users", uniqueDocId);
+      
+      const expirationMillis = newUserAccountType === "prueba" 
+        ? Date.now() + 3 * 24 * 60 * 60 * 1000 
+        : null;
+
+      await setDoc(userDocRef, {
+        apellido: normalizedNewApellido,
+        password: newUserPassword.trim(),
+        userName: newUserName.trim(),
+        selectedRouteType: newUserRoute,
+        checkedExercises: {},
+        lastLoginDate: "",
+        tipoCuenta: newUserAccountType,
+        fechaVencimiento: expirationMillis,
+        updatedAt: serverTimestamp()
+      });
+
+      setAddUserSuccess(`Hermano/a "${newUserName.trim()}" registrado/a correctamente. Puede ingresar con el Apellido: "${newUserApellido.trim()}" y la clave: "${newUserPassword.trim()}"`);
+      
+      // Clear input fields
+      setNewUserApellido("");
+      setNewUserName("");
+      setNewUserPassword("");
+      setNewUserAccountType("pago");
+      setNewUserRoute("suave");
+    } catch (err: any) {
+      console.error("Error adding user to Firestore:", err);
+      setAddUserError("Error al registrar en la base de datos de fe: " + err.message);
+    } finally {
+      setIsAddingUser(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -531,6 +635,13 @@ export default function App() {
 
       if (!matchedDoc) {
         setLoginError("Apellido o clave incorrectos. Verifique sus datos o consulte al instructor del templo.");
+        setIsLoggingIn(false);
+        return;
+      }
+
+      // Check expiration for trial/prueba accounts first
+      if (matchedDoc.tipoCuenta === "prueba" && matchedDoc.fechaVencimiento && Date.now() > matchedDoc.fechaVencimiento) {
+        setLoginError("Su cuenta de prueba de 3 días ha vencido. Comuníquese con el instructor Max para renovar su acceso completo.");
         setIsLoggingIn(false);
         return;
       }
@@ -938,7 +1049,13 @@ export default function App() {
               <button
                 type="button"
                 id="btn-landing-start"
-                onClick={() => setCurrentScreen("onboarding")}
+                onClick={() => {
+                  if (user && user.selectedRouteType && ["suave", "rodillas", "fuerza", "legendario"].includes(user.selectedRouteType)) {
+                    setCurrentScreen("dashboard");
+                  } else {
+                    setCurrentScreen("onboarding");
+                  }
+                }}
                 className="bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] font-extrabold text-lg md:text-2xl px-10 py-5 rounded-3xl shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-3 cursor-pointer ring-4 ring-[#5A6344]/10"
               >
                 <span>¡COMENZAR MI CAMINO!</span>
@@ -1145,11 +1262,46 @@ export default function App() {
 
               {/* Mini User Summary Badge */}
               <div className="flex flex-wrap items-center gap-3">
+                {user?.apellido === "max" && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setAddUserSuccess("");
+                      setAddUserError("");
+                      setShowAddUserModal(true);
+                    }}
+                    className="flex items-center gap-1.5 py-1.5 px-3 text-xs bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded-xl shadow-sm cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] focus:outline-none border border-amber-600 animate-pulse"
+                    title="Cargar y registrar nuevas personas en FuerteEnCristo"
+                  >
+                    <span>🛡️ Cargar Nueva Persona</span>
+                  </button>
+                )}
+
                 <div className="flex items-center gap-2 bg-[#FAF7F2] p-2 rounded-xl border border-[#EBE6DE] text-xs font-semibold">
                   <span>Hermano: <strong className="text-[#8B6E4E]">{userName || "Fiel"}</strong></span>
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 block animate-pulse"></span>
                   <button 
-                    onClick={handleRestartAll} 
+                    onClick={async () => {
+                      const newName = prompt("Escriba su nombre de pila o fe para el templo:", userName);
+                      if (newName && newName.trim()) {
+                        const trimmedName = newName.trim();
+                        setUserName(trimmedName);
+                        if (user) {
+                          try {
+                            const userDocRef = doc(db, "users", user.uid);
+                            await updateDoc(userDocRef, {
+                              userName: trimmedName,
+                              updatedAt: serverTimestamp()
+                            });
+                            const updatedUser = { ...user, userName: trimmedName };
+                            localStorage.setItem("fiel_custom_user", JSON.stringify(updatedUser));
+                            setUser(updatedUser);
+                          } catch (err) {
+                            console.error("Error setting name in Firestore:", err);
+                          }
+                        }
+                      }
+                    }} 
                     className="text-[10px] text-slate-400 hover:text-[#8B6E4E] underline uppercase pl-1 focus:outline-none cursor-pointer"
                   >
                     Editar
@@ -1797,6 +1949,183 @@ export default function App() {
             >
               ¡Entendido, muchas gracias!
             </button>
+          </div>
+        </div>
+      )}
+      {/* ----------------- MASTER: CARGAR NUEVA PERSONA MODAL ----------------- */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-[#EBE6DE] animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🛡️</span>
+                <h3 className="text-lg md:text-xl font-extrabold text-[#5A6344]">Registrar Nueva Persona</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddUserModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold p-1 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                title="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+              Como administrador (Max), carga los datos de fe de un nuevo hermano para que pueda iniciar sesión con su apellido y contraseña secreta.
+            </p>
+
+            {addUserSuccess && (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-2xl mb-4 leading-relaxed font-semibold">
+                {addUserSuccess}
+              </div>
+            )}
+
+            {addUserError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-2xl mb-4 leading-relaxed font-semibold">
+                {addUserError}
+              </div>
+            )}
+
+            <form onSubmit={handleAddUserSubmit} className="space-y-4">
+              {/* Apellido */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1">
+                  1. Apellido Paterno (Usuario de ingreso):
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Gomez (sin tildes para facilitarle el ingreso)"
+                  value={newUserApellido}
+                  onChange={(e) => setNewUserApellido(e.target.value)}
+                  className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#5A6344] focus:ring-1 focus:ring-[#5A6344]"
+                />
+                <span className="text-[10px] text-slate-400 block mt-1">Este campo se normaliza automáticamente al guardar. Sencillo e intuitivo.</span>
+              </div>
+
+              {/* Display Name */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1">
+                  2. Nombre de pila o fe (Cómo se mostrará):
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Hermano Mario, Abuela Marta"
+                  value={newUserName}
+                  onChange={(e) => setNewUserName(e.target.value)}
+                  className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#5A6344] focus:ring-1 focus:ring-[#5A6344]"
+                />
+              </div>
+
+              {/* Secret password */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1">
+                  3. Clave Secreta de Ingreso:
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. fiel321"
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#5A6344] focus:ring-1 focus:ring-[#5A6344]"
+                />
+              </div>
+
+              {/* Initial Route Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1 font-semibold">
+                  4. Sendero de Entrenamiento Base:
+                </label>
+                <select
+                  value={newUserRoute}
+                  onChange={(e: any) => setNewUserRoute(e.target.value)}
+                  className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#5A6344] focus:ring-1 focus:ring-[#5A6344] text-slate-700"
+                >
+                  <option value="suave">Sendero Súper Suave (Silla y apoyo)</option>
+                  <option value="rodillas">Cuidado de Rodillas y Espalda (Cero impacto)</option>
+                  <option value="fuerza">Siervo Activo y Fuerte (Fuerza general)</option>
+                  <option value="legendario">Sendero Legendario (Montañismo y resistencia)</option>
+                </select>
+              </div>
+
+              {/* Account Type Option */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1.5">
+                  5. Tipo de Vigencia / Suscripción:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className={`border-2 p-3 rounded-xl flex items-center gap-2 cursor-pointer transition-colors ${
+                    newUserAccountType === "prueba" 
+                      ? "border-amber-500 bg-amber-50/40 text-amber-900" 
+                      : "border-slate-200 hover:border-slate-300 text-slate-600"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="newUserAccountType"
+                      value="prueba"
+                      checked={newUserAccountType === "prueba"}
+                      onChange={() => setNewUserAccountType("prueba")}
+                      className="accent-[#5A6344]"
+                    />
+                    <div className="text-left">
+                      <span className="block text-xs font-extrabold uppercase">Prueba Limitada</span>
+                      <span className="text-[10px] text-slate-500 block">Vigente solo por 3 Días</span>
+                    </div>
+                  </label>
+
+                  <label className={`border-2 p-3 rounded-xl flex items-center gap-2 cursor-pointer transition-colors ${
+                    newUserAccountType === "pago" 
+                      ? "border-[#5A6344] bg-[#5A6344]/5 text-[#5A6344]" 
+                      : "border-slate-200 hover:border-slate-300 text-slate-600"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="newUserAccountType"
+                      value="pago"
+                      checked={newUserAccountType === "pago"}
+                      onChange={() => setNewUserAccountType("pago")}
+                      className="accent-[#5A6344]"
+                    />
+                    <div className="text-left">
+                      <span className="block text-xs font-extrabold uppercase">Usuario Pago</span>
+                      <span className="text-[10px] text-slate-500 block">Acceso ilimitado de fe</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-3">
+                <button
+                  type="submit"
+                  disabled={isAddingUser}
+                  className="w-full bg-[#5A6344] hover:bg-[#484f36] disabled:bg-slate-300 text-[#FAF7F2] font-extrabold text-sm py-3 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isAddingUser ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Registrando Hermano...</span>
+                    </>
+                  ) : (
+                    <span>Registrar e Integrar a la Iglesia</span>
+                  )}
+                </button>
+              </div>
+
+              <div className="text-center mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddUserModal(false)}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  Cerrar ventana
+                </button>
+              </div>
+
+            </form>
+
           </div>
         </div>
       )}
