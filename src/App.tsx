@@ -350,7 +350,7 @@ export default function App() {
       console.error("Login verification failed:", error);
       let errMsg = "Su Apellido o la contraseña son incorrectas. Por favor verifique o consulte con su instructor de la iglesia.";
       if (error.code === "auth/invalid-credential" || error.code === "auth/user-not-found" || error.code === "auth/wrong-password") {
-        errMsg = "Apellido o clave incorrectos. Verifique sus datos o consulte al maestro.";
+        errMsg = "Apellido o clave incorrectos. Verifique sus datos o consulte al instructor.";
       } else if (error.code === "auth/invalid-email") {
         errMsg = "Formato no válido. Escriba solo su Apellido paterno en letras.";
       } else if (error.code === "auth/network-request-failed") {
@@ -567,7 +567,7 @@ export default function App() {
               ¿No tiene acceso?
             </p>
             <p className="text-[11px] text-slate-500 mt-1 max-w-xs mx-auto leading-relaxed">
-              El registro lo realiza manualmente el maestro de la iglesia una vez completado el abono. Consulte a su instructor para obtener sus credenciales.
+              El registro lo realiza manualmente el instructor una vez completado el abono. Consulte a su instructor para obtener sus credenciales.
             </p>
           </div>
         </div>
