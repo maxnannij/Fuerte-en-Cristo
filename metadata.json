@@ -1,0 +1,6 @@
+{
+  "name": "FuerteEnCristo",
+  "description": "Entrenador personal cristiano de fitness desde casa para principiantes. Combina ejercicio funcional con reflexiones y fe.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
