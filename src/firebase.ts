@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 import appletConfig from "../firebase-applet-config.json";
 
 // Combine standard environment variables (best for GitHub, Vercel, Netlify)
@@ -19,6 +20,9 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Firebase Authentication
 export const auth = getAuth(app);
+
+// Initialize Cloud Firestore
+export const db = getFirestore(app, appletConfig.firestoreDatabaseId || "(default)");
 
 /**
  * Normalizes a surname for authentication:

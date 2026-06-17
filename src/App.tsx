@@ -31,7 +31,8 @@ import {
 import { WeeklyDayPlan, ExerciseItem, TodayWorkout, PalabraDeFe, PersonalFitnessPlan } from "./types";
 import { ROUTINES_BY_ROUTE_AND_DAY } from "./routines";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User as FirebaseUser } from "firebase/auth";
-import { auth, normalizeLastNameToEmail } from "./firebase";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { auth, normalizeLastNameToEmail, db } from "./firebase";
 
 // PRE-DEFINED OFFLINE PROGRAMS (No AI API call needed, completely immediate & secure)
 const PROGRAM_SUPER_SUAVE: PersonalFitnessPlan = {
@@ -325,7 +326,7 @@ export default function App() {
   const [userName, setUserName] = useState<string>("");
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
         // Automatically compute userName from email or display name
@@ -335,14 +336,73 @@ export default function App() {
           : "Hermano";
         setUserName(capitalName);
 
-        // Load saved route
-        const savedRoute = localStorage.getItem(`fiel_selected_route_${currentUser.uid}`);
-        if (savedRoute && ["suave", "rodillas", "fuerza", "legendario"].includes(savedRoute)) {
-          setSelectedRouteType(savedRoute as any);
-          setCurrentScreen("dashboard");
-        } else {
-          setCurrentScreen("landing");
+        // Load saved route and configuration from Firestore first, fallback to localStorage
+        try {
+          const userDocRef = doc(db, "users", currentUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          
+          if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            console.log("Loaded user data from Firestore:", data);
+            
+            if (data.userName) {
+              setUserName(data.userName);
+            }
+            if (data.selectedRouteType && ["suave", "rodillas", "fuerza", "legendario"].includes(data.selectedRouteType)) {
+              setSelectedRouteType(data.selectedRouteType as any);
+              setCurrentScreen("dashboard");
+            } else {
+              setCurrentScreen("landing");
+            }
+            if (data.checkedExercises) {
+              setCheckedExercises(data.checkedExercises);
+            }
+          } else {
+            // No custom data in Firestore yet; check localStorage for backwards compatibility
+            const savedRoute = localStorage.getItem(`fiel_selected_route_${currentUser.uid}`);
+            const localChecked = localStorage.getItem(`fiel_checked_${currentUser.uid}`);
+            
+            const initialRoute = (savedRoute && ["suave", "rodillas", "fuerza", "legendario"].includes(savedRoute))
+              ? (savedRoute as any) 
+              : "suave";
+              
+            const initialChecked = localChecked ? JSON.parse(localChecked) : {};
+            
+            setSelectedRouteType(initialRoute);
+            setCheckedExercises(initialChecked);
+            
+            // Backpopulate to Firestore so they are initialized in the cloud
+            await setDoc(userDocRef, {
+              userName: capitalName,
+              selectedRouteType: initialRoute,
+              checkedExercises: initialChecked,
+              lastLoginDate: "",
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+            
+            if (savedRoute) {
+              setCurrentScreen("dashboard");
+            } else {
+              setCurrentScreen("landing");
+            }
+          }
+        } catch (err) {
+          console.error("Error reading from Firestore upon login:", err);
+          // Standard offline fallback
+          const savedRoute = localStorage.getItem(`fiel_selected_route_${currentUser.uid}`);
+          if (savedRoute && ["suave", "rodillas", "fuerza", "legendario"].includes(savedRoute)) {
+            setSelectedRouteType(savedRoute as any);
+            setCurrentScreen("dashboard");
+          } else {
+            setCurrentScreen("landing");
+          }
+          const localChecked = localStorage.getItem(`fiel_checked_${currentUser.uid}`);
+          if (localChecked) {
+            setCheckedExercises(JSON.parse(localChecked));
+          }
         }
+      } else {
+        setCheckedExercises({});
       }
       setAuthLoading(false);
     });
@@ -392,10 +452,21 @@ export default function App() {
 
   const [selectedRouteType, setSelectedRouteType] = useState<"suave" | "rodillas" | "fuerza" | "legendario">("suave");
 
-  const handleSelectRoute = (route: "suave" | "rodillas" | "fuerza" | "legendario") => {
+  const handleSelectRoute = async (route: "suave" | "rodillas" | "fuerza" | "legendario") => {
     setSelectedRouteType(route);
     if (user) {
       localStorage.setItem(`fiel_selected_route_${user.uid}`, route);
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        await setDoc(userDocRef, {
+          selectedRouteType: route,
+          userName: userName,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        console.log("Successfully updated route & userName in Firestore:", route, userName);
+      } catch (err) {
+        console.error("Error saving user route to Firestore:", err);
+      }
     }
   };
 
@@ -433,6 +504,19 @@ export default function App() {
       
       console.log("Checking login date streak logic. Last login:", lastLoginStr, "Today:", todayStr);
       
+      // Sync lastLoginDate to Firestore
+      const updateLastLoginFirestore = async (dateStr: string) => {
+        try {
+          const userDocRef = doc(db, "users", user.uid);
+          await setDoc(userDocRef, {
+            lastLoginDate: dateStr,
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error syncing login date to Firestore:", err);
+        }
+      };
+      
       if (lastLoginStr) {
         if (lastLoginStr !== todayStr) {
           const lastDate = new Date(lastLoginStr + "T00:00:00");
@@ -459,13 +543,41 @@ export default function App() {
           
           // Update last login to today
           localStorage.setItem(`fiel_last_login_date_${user.uid}`, todayStr);
+          updateLastLoginFirestore(todayStr);
         }
       } else {
         // First login: register today so tracking starts tomorrow
         localStorage.setItem(`fiel_last_login_date_${user.uid}`, todayStr);
+        updateLastLoginFirestore(todayStr);
       }
     }
   }, [user]);
+
+  // Sync checked exercises to Firestore and LocalStorage
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem(`fiel_checked_${user.uid}`, JSON.stringify(checkedExercises));
+      
+      const syncChecked = async () => {
+        try {
+          const userDocRef = doc(db, "users", user.uid);
+          await setDoc(userDocRef, {
+            checkedExercises: checkedExercises,
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+          console.log("Successfully synced checkedExercises to Cloud Firestore");
+        } catch (err) {
+          console.error("Error syncing checkedExercises to Firestore:", err);
+        }
+      };
+      
+      const debounceTimeout = setTimeout(() => {
+        syncChecked();
+      }, 600);
+      
+      return () => clearTimeout(debounceTimeout);
+    }
+  }, [checkedExercises, user]);
 
   // Set the plan based on selected path
   useEffect(() => {
