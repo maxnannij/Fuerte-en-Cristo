@@ -26,7 +26,8 @@ import {
   Lock,
   LogOut,
   Eye,
-  EyeOff
+  EyeOff,
+  Download
 } from "lucide-react";
 import { WeeklyDayPlan, ExerciseItem, TodayWorkout, PalabraDeFe, PersonalFitnessPlan } from "./types";
 import { ROUTINES_BY_ROUTE_AND_DAY } from "./routines";
@@ -322,6 +323,63 @@ export default function App() {
   // 4. "player" -> FULL SCREEN EXERCISE DETAIL MODE: Giant typography, massive "Siguiente" button, descanso timer.
   const [currentScreen, setCurrentScreen] = useState<"landing" | "onboarding" | "dashboard" | "player">("landing");
   
+  // PWA elements for installation from the web
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBtn, setShowInstallBtn] = useState<boolean>(false);
+  const [showInstallHelp, setShowInstallHelp] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBtn(true);
+      console.log("PWA beforeinstallprompt event captured!");
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+
+    const handleAppInstalled = () => {
+      console.log("PWA App installed successfully!");
+      setShowInstallBtn(false);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    // Initial check: if already running as standalone PWA
+    if (window.matchMedia("(display-mode: standalone)").matches) {
+      setShowInstallBtn(false);
+    } else {
+      // Show default helper link for users to learn how to install manually
+      setShowInstallBtn(true);
+    }
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      try {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log(`User responded to PWA install prompt: ${outcome}`);
+        if (outcome === "accepted") {
+          setShowInstallBtn(false);
+          setDeferredPrompt(null);
+        }
+      } catch (err) {
+        console.error("Error showing PWA install prompt:", err);
+        setShowInstallHelp(true);
+      }
+    } else {
+      // No standard auto prompt triggerable; display friendly step-by-step instructions (iOS/Safari/Firefox compatibility)
+      setShowInstallHelp(true);
+    }
+  };
+
   // Profile settings (safe local storage / default fallback)
   const [userName, setUserName] = useState<string>("");
 
@@ -815,6 +873,19 @@ export default function App() {
                 <ChevronRight className="w-6 h-6 stroke-[3]" />
               </button>
             </div>
+
+            {showInstallBtn && (
+              <div className="flex justify-center mt-6 z-10 animate-fade-in">
+                <button
+                  type="button"
+                  onClick={handleInstallApp}
+                  className="inline-flex items-center gap-2 text-xs font-bold text-[#8B6E4E] bg-[#D9B99B]/20 hover:bg-[#D9B99B]/35 border border-[#D9B99B]/40 px-4 py-2 rounded-2xl cursor-pointer transition-all hover:scale-102"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-600" />
+                  <span>¿Prefieres instalar la app en tu celular o computadora? Haz clic aquí</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Footer of Landing */}
@@ -1023,6 +1094,18 @@ export default function App() {
                     Cambiar
                   </button>
                 </div>
+                
+                {showInstallBtn && (
+                  <button 
+                    type="button"
+                    onClick={handleInstallApp}
+                    className="flex items-center gap-1.5 py-1.5 px-3 text-xs bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded-xl shadow-xs cursor-pointer transition-all focus:outline-none hover:scale-[1.02] active:scale-[0.98]"
+                    title="Instalar esta aplicación en tu celular, tablet o computadora"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Instalar App</span>
+                  </button>
+                )}
                 
                 <button 
                   onClick={handleLogout}
@@ -1564,6 +1647,54 @@ export default function App() {
             "No temas, porque yo estoy contigo; no desmayes, porque yo soy tu Dios que te esfuerzo..." — Isaías 41:10
           </footer>
 
+        </div>
+      )}
+
+      {/* ----------------- PWA MANUAL INSTALL INSTRUCTIONS MODAL ----------------- */}
+      {showInstallHelp && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border border-[#EBE6DE] animate-in fade-in zoom-in-95 duration-150">
+            <div className="text-center mb-6">
+              <span className="text-4xl">📲</span>
+              <h3 className="text-xl md:text-2xl font-extrabold text-[#5A6344] mt-3">Instalar Fuerte en Cristo</h3>
+              <p className="text-xs text-slate-500 mt-1">Cómo tener la app en tu pantalla de inicio o escritorio</p>
+            </div>
+
+            <div className="space-y-4 text-sm text-slate-700 leading-relaxed font-sans">
+              
+              <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#EBE6DE]">
+                <strong className="block text-[#8B6E4E] text-xs font-bold uppercase mb-1">En Google Chrome / Edge (PC o Android)</strong>
+                <p className="text-xs">
+                  Haz clic en el icono de descargas <Download className="w-3.5 h-3.5 inline text-amber-600" /> en la barra de direcciones superior (en PC), o abre el menú de tres puntos <strong className="font-bold">⋮</strong> y selecciona <strong className="font-semibold">"Instalar aplicación"</strong> o <strong className="font-semibold">"Agregar a la pantalla principal"</strong>.
+                </p>
+              </div>
+
+              <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#EBE6DE]">
+                <strong className="block text-[#8B6E4E] text-xs font-bold uppercase mb-1">En iPhone y iPad (Safari)</strong>
+                <p className="text-xs">
+                  Toca el botón de compartir 📤 en la parte de abajo de Safari, desplázate por la lista hacia abajo y dale clic a <strong className="font-semibold">"Agregar al inicio"</strong> o <strong className="font-semibold">"Add to Home Screen"</strong>. ¡Es facilísimo!
+                </p>
+              </div>
+
+              <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#EBE6DE]">
+                <strong className="block text-[#8B6E4E] text-xs font-bold uppercase mb-1">Ventajas de tener la App instalada</strong>
+                <ul className="list-disc pl-4 text-xs space-y-1 mt-1 font-medium text-slate-600">
+                  <li>Acceso directo con un lindo icono en tu celular o computadora.</li>
+                  <li>Inicia más rápido y aprovecha toda la pantalla (sin la barra superior).</li>
+                  <li>Mejor velocidad cargando tus ejercicios de fe y fitness.</li>
+                </ul>
+              </div>
+
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowInstallHelp(false)}
+              className="mt-6 w-full bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] font-extrabold text-base py-3 rounded-2xl shadow-md transition-all cursor-pointer text-center"
+            >
+              ¡Entendido, muchas gracias!
+            </button>
+          </div>
         </div>
       )}
 
