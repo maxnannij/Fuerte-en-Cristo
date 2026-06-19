@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { WeeklyDayPlan, ExerciseItem, TodayWorkout, PalabraDeFe, PersonalFitnessPlan } from "./types";
 import { ROUTINES_BY_ROUTE_AND_DAY } from "./routines";
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, addDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
 
 // PRE-DEFINED OFFLINE PROGRAMS (No AI API call needed, completely immediate & secure)
@@ -429,15 +429,182 @@ export default function App() {
       });
       setRegisteredUsersList(list);
     } catch (err: any) {
-      console.error("Error fetching registered users for Max panel:", err);
+      console.error("Error fetching registered users:", err);
     } finally {
       setIsLoadingUsersList(false);
     }
   };
 
-  useEffect(() => {
-    if (user && user.apellido === "max") {
+  // Master Administrator active sub-tab (For Max: directory of members vs. challenges manager)
+  const [activeAdminTab, setActiveAdminTab] = useState<"socios" | "desafios">("socios");
+
+  // Premium client tab
+  const [activeDashboardTab, setActiveDashboardTab] = useState<"plan" | "desafios" | "ranking">("plan");
+
+  // Challenges States
+  const [challengesList, setChallengesList] = useState<any[]>([]);
+  const [isLoadingChallenges, setIsLoadingChallenges] = useState<boolean>(false);
+
+  // States for creating challenges
+  const [newChallengeTitle, setNewChallengeTitle] = useState<string>("");
+  const [newChallengeDesc, setNewChallengeDesc] = useState<string>("");
+  const [newChallengeType, setNewChallengeType] = useState<"diario" | "semanal">("diario");
+  const [newChallengePoints, setNewChallengePoints] = useState<number>(10);
+  const [isSubmittingChallenge, setIsSubmittingChallenge] = useState<boolean>(false);
+  const [challengeSuccessMsg, setChallengeSuccessMsg] = useState<string>("");
+  const [challengeErrorMsg, setChallengeErrorMsg] = useState<string>("");
+
+  const fetchChallengesList = async () => {
+    setIsLoadingChallenges(true);
+    try {
+      const q = collection(db, "challenges");
+      const snap = await getDocs(q);
+      const list: any[] = [];
+      snap.forEach((d) => {
+        list.push({ id: d.id, ...d.data() });
+      });
+      // Sort by creation or type
+      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      setChallengesList(list);
+    } catch (err) {
+      console.error("Error fetching challenges:", err);
+    } finally {
+      setIsLoadingChallenges(false);
+    }
+  };
+
+  const handleCreateChallenge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChallengeSuccessMsg("");
+    setChallengeErrorMsg("");
+
+    if (!newChallengeTitle.trim() || !newChallengeDesc.trim()) {
+      setChallengeErrorMsg("Por favor complete el nombre y descripción del desafío.");
+      return;
+    }
+
+    setIsSubmittingChallenge(true);
+    try {
+      await addDoc(collection(db, "challenges"), {
+        titulo: newChallengeTitle.trim(),
+        descripcion: newChallengeDesc.trim(),
+        tipo: newChallengeType,
+        puntos: Number(newChallengePoints) || 10,
+        createdAt: new Date().getTime(),
+      });
+      setNewChallengeTitle("");
+      setNewChallengeDesc("");
+      setNewChallengePoints(10);
+      setChallengeSuccessMsg("¡Desafío creado con éxito!");
+      fetchChallengesList();
+    } catch (err: any) {
+      console.error("Error creating challenge:", err);
+      setChallengeErrorMsg("Error al crear desafío: " + err.message);
+    } finally {
+      setIsSubmittingChallenge(false);
+    }
+  };
+
+  const handleDeleteChallenge = async (challengeId: string) => {
+    if (!window.confirm("¿Seguro que deseas eliminar este desafío?")) {
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, "challenges", challengeId));
+      fetchChallengesList();
+    } catch (err: any) {
+      alert("Error al eliminar el desafío: " + err.message);
+    }
+  };
+
+  const handleCompleteChallenge = async (challengeId: string) => {
+    if (!user) {
+      alert("Debes iniciar sesión para completar desafíos.");
+      return;
+    }
+
+    const currentCompleted = user.desafiosCompletadosIds || [];
+    if (currentCompleted.includes(challengeId)) {
+      alert("¡Ya has superado este desafío espiritual!");
+      return;
+    }
+
+    try {
+      const userDocRef = doc(db, "users", user.uid);
+      const nextCompleted = [...currentCompleted, challengeId];
+      const nextCount = (user.desafiosSuperadosCount || 0) + 1;
+
+      // Update in Firestore
+      await updateDoc(userDocRef, {
+        desafiosCompletadosIds: nextCompleted,
+        desafiosSuperadosCount: nextCount,
+        updatedAt: serverTimestamp()
+      });
+
+      // Update in local state & localStorage
+      const updatedUser = { 
+        ...user, 
+        desafiosCompletadosIds: nextCompleted, 
+        desafiosSuperadosCount: nextCount 
+      };
+      setUser(updatedUser);
+      localStorage.setItem("fiel_custom_user", JSON.stringify(updatedUser));
+
+      alert("¡AMÉN! Has completado el desafío con éxito. Se sumará a tu récord fraternal. 🙏✨");
+      
+      // Refresh ranking list
       fetchRegisteredUsers();
+    } catch (err: any) {
+      console.error("Error completing challenge:", err);
+      alert("No se pudo registrar el desafío completado: " + err.message);
+    }
+  };
+
+  const handleRegisterDailyStreak = async () => {
+    if (!user) return;
+
+    const dateObj = new Date();
+    const localYear = dateObj.getFullYear();
+    const localMonth = String(dateObj.getMonth() + 1).padStart(2, "0");
+    const localDay = String(dateObj.getDate()).padStart(2, "0");
+    const todayStr = `${localYear}-${localMonth}-${localDay}`;
+
+    const lastStreakReg = user.lastStreakRegistrationDate || "";
+    if (lastStreakReg === todayStr) {
+      alert("¡Ya reportaste tu sudor y fe el día de hoy, hermano/a! Mantente firme hasta mañana. 🔥📖");
+      return;
+    }
+
+    try {
+      const userDocRef = doc(db, "users", user.uid);
+      let newRacha = (user.rachaDias || 0) + 1;
+      
+      await updateDoc(userDocRef, {
+        rachaDias: newRacha,
+        lastStreakRegistrationDate: todayStr,
+        updatedAt: serverTimestamp()
+      });
+
+      const updatedUser = {
+        ...user,
+        rachaDias: newRacha,
+        lastStreakRegistrationDate: todayStr
+      };
+      setUser(updatedUser);
+      localStorage.setItem("fiel_custom_user", JSON.stringify(updatedUser));
+      
+      alert(`¡Gloria a Dios! Racha actualizada: ¡Llevas ${newRacha} ${newRacha === 1 ? "día" : "días"} de perseverancia seguidos! 🔥🛡️`);
+      fetchRegisteredUsers();
+    } catch (err: any) {
+      console.error("Error registering daily streak:", err);
+      alert("No se pudo registrar la racha: " + err.message);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchRegisteredUsers();
+      fetchChallengesList();
     }
   }, [user]);
 
@@ -1386,211 +1553,664 @@ export default function App() {
             {user?.apellido === "max" ? (
               <div className="space-y-8 animate-in fade-in duration-300">
                 
-                {/* Header card for panel */}
-                <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xs border border-[#EBE6DE]">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-3xl">🛡️</span>
-                        <h2 className="text-xl md:text-2xl font-extrabold text-[#5A6344] tracking-tight">
-                          Directorio FuerteEnCristo
-                        </h2>
-                      </div>
-                      <p className="text-xs sm:text-sm text-slate-500 max-w-2xl leading-relaxed">
-                        Como administrador principal (Max), aquí puedes registrar nuevas personas, consultar sus claves secretas y verificar la vigencia de sus suscripciones de entrenamiento.
-                      </p>
-                    </div>
-                    
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAddUserSuccess("");
-                        setAddUserError("");
-                        setShowAddUserModal(true);
-                      }}
-                      className="w-full sm:w-auto bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] font-black text-sm px-6 py-4 rounded-2xl shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <span>🛡️ Registrar Nueva Persona</span>
-                    </button>
-                  </div>
+                {/* Admin Tab Switcher */}
+                <div className="flex border-b border-[#EBE6DE] gap-4 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveAdminTab("socios")}
+                    className={`pb-3 text-xs sm:text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer focus:outline-none ${
+                      activeAdminTab === "socios"
+                        ? "border-[#5A6344] text-[#5A6344]"
+                        : "border-transparent text-slate-400 hover:text-slate-600"
+                    }`}
+                  >
+                    👥 Directorio de Socios
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveAdminTab("desafios")}
+                    className={`pb-3 text-xs sm:text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer focus:outline-none ${
+                      activeAdminTab === "desafios"
+                        ? "border-[#5A6344] text-[#5A6344]"
+                        : "border-transparent text-slate-400 hover:text-slate-600"
+                    }`}
+                  >
+                    ⚔️ Crear y Administrar Desafíos
+                  </button>
                 </div>
 
-                {/* Statistics bento grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-xl border border-slate-100">👥</div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Registrados</span>
-                      <strong className="text-xl md:text-2xl font-black text-[#5A6344] block">
-                        {isLoadingUsersList ? "..." : registeredUsersList.length}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-xl border border-emerald-100">🟢</div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Usuarios de Pago</span>
-                      <strong className="text-xl md:text-2xl font-black text-emerald-700 block">
-                        {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "pago").length}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-amber-50/50 flex items-center justify-center text-xl border border-amber-100">⏳</div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Pruebas Temporales</span>
-                      <strong className="text-xl md:text-2xl font-black text-amber-700 block">
-                        {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "prueba").length}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Table containing the active members */}
-                <div className="bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE]">
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="font-extrabold text-[#5A6344] text-xs sm:text-sm uppercase tracking-wider">
-                      Lista de Personas Registradas ({registeredUsersList.length})
-                    </h3>
-                    
-                    <button
-                      type="button"
-                      onClick={fetchRegisteredUsers}
-                      disabled={isLoadingUsersList}
-                      className="flex items-center gap-1.5 py-2 px-3 text-xs text-slate-500 hover:text-[#5A6344] bg-[#FAF7F2] border border-[#EBE6DE] rounded-xl font-bold cursor-pointer transition-all hover:bg-slate-50 disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3 h-3 ${isLoadingUsersList ? "animate-spin" : ""}`} />
-                      <span>{isLoadingUsersList ? "Sincronizando..." : "Sincronizar Lista"}</span>
-                    </button>
-                  </div>
-
-                  {isLoadingUsersList && registeredUsersList.length === 0 ? (
-                    <div className="py-20 text-center text-slate-400 space-y-3">
-                      <div className="w-8 h-8 border-2 border-[#5A6344] border-t-transparent rounded-full animate-spin mx-auto"></div>
-                      <p className="text-xs font-semibold">Cargando base de datos de fe...</p>
-                    </div>
-                  ) : registeredUsersList.length === 0 ? (
-                    <div className="py-16 text-center text-slate-400">
-                      <span className="text-4xl block mb-2">⛪</span>
-                      <p className="text-xs font-semibold text-slate-500">Aún no hay hermanos cargados. ¡Registra al primero con el botón de arriba!</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {registeredUsersList.map((row, index) => {
-                        const isTrial = row.tipoCuenta === "prueba";
+                {activeAdminTab === "socios" ? (
+                  <>
+                    {/* Header card for panel */}
+                    <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xs border border-[#EBE6DE]">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-3xl">🛡️</span>
+                            <h2 className="text-xl md:text-2xl font-extrabold text-[#5A6344] tracking-tight">
+                              Directorio FuerteEnCristo
+                            </h2>
+                          </div>
+                          <p className="text-xs sm:text-sm text-slate-500 max-w-2xl leading-relaxed">
+                            Como administrador principal (Max), aquí puedes registrar nuevas personas, consultar sus claves secretas y verificar la vigencia de sus suscripciones de entrenamiento.
+                          </p>
+                        </div>
                         
-                        // Vigencia helper
-                        let vigText = "Usuario Pago";
-                        let vigColor = "bg-emerald-50 text-emerald-800 border-emerald-200";
-                        if (isTrial) {
-                          if (row.fechaVencimiento) {
-                            const remains = row.fechaVencimiento - Date.now();
-                            if (remains <= 0) {
-                              vigText = "Prueba Vencida (Expirado)";
-                              vigColor = "bg-red-50 text-red-800 border-red-200";
-                            } else {
-                              const daysLeft = Math.ceil(remains / (24 * 60 * 60 * 1000));
-                              vigText = `Prueba Activa (${daysLeft} ${daysLeft === 1 ? "día" : "días"} restante)`;
-                              vigColor = "bg-amber-50 text-amber-800 border-amber-200 font-semibold";
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddUserSuccess("");
+                            setAddUserError("");
+                            setShowAddUserModal(true);
+                          }}
+                          className="w-full sm:w-auto bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] font-black text-sm px-6 py-4 rounded-2xl shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <span>🛡️ Registrar Nueva Persona</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Statistics bento grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-xl border border-slate-100">👥</div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Registrados</span>
+                          <strong className="text-xl md:text-2xl font-black text-[#5A6344] block">
+                            {isLoadingUsersList ? "..." : registeredUsersList.length}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-xl border border-emerald-100">🟢</div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Usuarios de Pago</span>
+                          <strong className="text-xl md:text-2xl font-black text-emerald-700 block">
+                            {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "pago").length}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-50/50 flex items-center justify-center text-xl border border-amber-100">⏳</div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Pruebas Temporales</span>
+                          <strong className="text-xl md:text-2xl font-black text-amber-700 block">
+                            {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "prueba").length}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Table containing the active members */}
+                    <div className="bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE]">
+                      <div className="flex justify-between items-center mb-6">
+                        <h3 className="font-extrabold text-[#5A6344] text-xs sm:text-sm uppercase tracking-wider">
+                          Lista de Personas Registradas ({registeredUsersList.length})
+                        </h3>
+                        
+                        <button
+                          type="button"
+                          onClick={fetchRegisteredUsers}
+                          disabled={isLoadingUsersList}
+                          className="flex items-center gap-1.5 py-2 px-3 text-xs text-slate-500 hover:text-[#5A6344] bg-[#FAF7F2] border border-[#EBE6DE] rounded-xl font-bold cursor-pointer transition-all hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isLoadingUsersList ? "animate-spin" : ""}`} />
+                          <span>{isLoadingUsersList ? "Sincronizando..." : "Sincronizar Lista"}</span>
+                        </button>
+                      </div>
+
+                      {isLoadingUsersList && registeredUsersList.length === 0 ? (
+                        <div className="py-20 text-center text-slate-400 space-y-3">
+                          <div className="w-8 h-8 border-2 border-[#5A6344] border-t-transparent rounded-full animate-spin mx-auto"></div>
+                          <p className="text-xs font-semibold">Cargando base de datos de fe...</p>
+                        </div>
+                      ) : registeredUsersList.length === 0 ? (
+                        <div className="py-16 text-center text-slate-400">
+                          <span className="text-4xl block mb-2">⛪</span>
+                          <p className="text-xs font-semibold text-slate-500">Aún no hay hermanos cargados. ¡Registra al primero con el botón de arriba!</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {registeredUsersList.map((row, index) => {
+                            const isTrial = row.tipoCuenta === "prueba";
+                            
+                            // Vigencia helper
+                            let vigText = "Usuario Pago";
+                            let vigColor = "bg-emerald-50 text-emerald-800 border-emerald-200";
+                            if (isTrial) {
+                              if (row.fechaVencimiento) {
+                                const remains = row.fechaVencimiento - Date.now();
+                                if (remains <= 0) {
+                                  vigText = "Prueba Vencida (Expirado)";
+                                  vigColor = "bg-red-50 text-red-800 border-red-200";
+                                } else {
+                                  const daysLeft = Math.ceil(remains / (24 * 60 * 60 * 1000));
+                                  vigText = `Prueba Activa (${daysLeft} ${daysLeft === 1 ? "día" : "días"} de gracia restante)`;
+                                  vigColor = "bg-amber-50 text-amber-800 border-amber-200 font-semibold";
+                                }
+                              } else {
+                                vigText = "Prueba Temporal (3 Días)";
+                                vigColor = "bg-amber-50 text-amber-800 border-amber-200";
+                              }
                             }
-                          } else {
-                            vigText = "Prueba Temporal (3 Días)";
-                            vigColor = "bg-amber-50 text-amber-800 border-amber-200";
-                          }
-                        }
 
-                        // Baseline path emoji helper
-                        let baselineRouteEmoji = "🛋️";
-                        let baselineRouteTitle = "Súper Suave";
-                        if (row.selectedRouteType === "rodillas") {
-                          baselineRouteEmoji = "🦵";
-                          baselineRouteTitle = "Rodillas e Impacto Cero";
-                        } else if (row.selectedRouteType === "fuerza") {
-                          baselineRouteEmoji = "🛡️";
-                          baselineRouteTitle = "Siervo Fuerte / General";
-                        } else if (row.selectedRouteType === "legendario") {
-                          baselineRouteEmoji = "🏔️";
-                          baselineRouteTitle = "Legendario (Montañismo)";
-                        }
+                            // Baseline path emoji helper
+                            let baselineRouteEmoji = "🛋️";
+                            let baselineRouteTitle = "Súper Suave";
+                            if (row.selectedRouteType === "rodillas") {
+                              baselineRouteEmoji = "🦵";
+                              baselineRouteTitle = "Rodillas e Impacto Cero";
+                            } else if (row.selectedRouteType === "fuerza") {
+                              baselineRouteEmoji = "🛡️";
+                              baselineRouteTitle = "Siervo Fuerte / General";
+                            } else if (row.selectedRouteType === "legendario") {
+                              baselineRouteEmoji = "🏔️";
+                              baselineRouteTitle = "Legendario (Montañismo)";
+                            }
 
-                        return (
-                          <div 
-                            key={row.uid || index}
-                            className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#EBE6DE] flex flex-col justify-between hover:border-slate-300 transition-colors"
-                          >
-                            <div>
-                              <div className="flex justify-between items-start gap-2 mb-3">
+                            return (
+                              <div 
+                                key={row.uid || index}
+                                className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#EBE6DE] flex flex-col justify-between hover:border-slate-300 transition-colors"
+                              >
                                 <div>
-                                  <h4 className="font-extrabold text-base text-[#5A6344]">
-                                    {row.userName || "Hermano registrado"}
-                                  </h4>
-                                  <span className="text-[11px] text-slate-400 font-mono tracking-wider block mt-0.5">
-                                    Apellido: <strong className="text-slate-600 font-semibold uppercase">{row.apellido || "N/A"}</strong>
-                                  </span>
-                                </div>
-                                <span className={`text-[10px] px-2.5 py-1 font-extrabold rounded-full border ${vigColor}`}>
-                                  {vigText}
-                                </span>
-                              </div>
-
-                              <div className="space-y-2 mt-4 text-xs font-sans">
-                                <div className="flex items-center gap-1.5 p-2 bg-white rounded-xl border border-[#EBE6DE]">
-                                  <span className="text-slate-400 font-bold block shrink-0 text-[10px] uppercase">Clave:</span>
-                                  <code className="bg-slate-100 px-2 py-0.5 rounded font-mono font-bold text-[#8B6E4E]">{row.password || "Sin clave"}</code>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(row.password || "");
-                                      alert(`Clave "${row.password}" copiada para darle al hermano.`);
-                                    }}
-                                    className="ml-auto text-[10px] text-slate-400 hover:text-[#5A6344] focus:outline-none uppercase inline-flex items-center gap-0.5 font-bold cursor-pointer"
-                                    title="Copiar contraseña"
-                                  >
-                                    <span>Copiar</span>
-                                  </button>
-                                </div>
-
-                                <div className="flex items-center justify-between text-xs text-slate-600">
-                                  <span className="font-semibold text-[10px] uppercase text-slate-400">Sendero Inicial:</span>
-                                  <span className="font-bold flex items-center gap-1 text-[#5A6344]">
-                                    <span>{baselineRouteEmoji}</span>
-                                    <span>{baselineRouteTitle}</span>
-                                  </span>
-                                </div>
-
-                                {row.fechaVencimiento && (
-                                  <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200/50 pt-2">
-                                    <span className="font-semibold text-[10px] uppercase text-slate-400">Expiración:</span>
-                                    <span className="font-bold text-slate-700">
-                                      {new Date(row.fechaVencimiento).toLocaleDateString()}
+                                  <div className="flex justify-between items-start gap-2 mb-3">
+                                    <div>
+                                      <h4 className="font-extrabold text-base text-[#5A6344]">
+                                        {row.userName || "Hermano registrado"}
+                                      </h4>
+                                      <span className="text-[11px] text-slate-400 font-mono tracking-wider block mt-0.5">
+                                        Apellido: <strong className="text-slate-600 font-semibold uppercase">{row.apellido || "N/A"}</strong>
+                                      </span>
+                                    </div>
+                                    <span className={`text-[10px] px-2.5 py-1 font-extrabold rounded-full border ${vigColor}`}>
+                                      {vigText}
                                     </span>
                                   </div>
-                                )}
+
+                                  <div className="space-y-2 mt-4 text-xs font-sans">
+                                    <div className="flex items-center gap-1.5 p-2 bg-white rounded-xl border border-[#EBE6DE]">
+                                      <span className="text-slate-400 font-bold block shrink-0 text-[10px] uppercase">Clave:</span>
+                                      <code className="bg-slate-100 px-2 py-0.5 rounded font-mono font-bold text-[#8B6E4E]">{row.password || "Sin clave"}</code>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(row.password || "");
+                                          alert(`Clave "${row.password}" copiada para darle al hermano.`);
+                                        }}
+                                        className="ml-auto text-[10px] text-slate-400 hover:text-[#5A6344] focus:outline-none uppercase inline-flex items-center gap-0.5 font-bold cursor-pointer"
+                                        title="Copiar contraseña"
+                                      >
+                                        <span>Copiar</span>
+                                      </button>
+                                    </div>
+
+                                    <div className="flex items-center justify-between text-xs text-slate-600">
+                                      <span className="font-semibold text-[10px] uppercase text-slate-400">Sendero Inicial:</span>
+                                      <span className="font-bold flex items-center gap-1 text-[#5A6344]">
+                                        <span>{baselineRouteEmoji}</span>
+                                        <span>{baselineRouteTitle}</span>
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center justify-between text-xs text-slate-600">
+                                      <span className="font-semibold text-[10px] uppercase text-slate-400">Récord Fraternal:</span>
+                                      <span className="text-xs text-slate-700 font-bold">
+                                        🔥 {row.rachaDias || 0} racha | ⚔️ {row.desafiosSuperadosCount || 0} superados
+                                      </span>
+                                    </div>
+
+                                    {row.fechaVencimiento && (
+                                      <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200/50 pt-2">
+                                        <span className="font-semibold text-[10px] uppercase text-slate-400">Expiración:</span>
+                                        <span className="font-bold text-slate-700">
+                                          {new Date(row.fechaVencimiento).toLocaleDateString()}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex justify-between items-center text-[10px] text-slate-400 mt-4 border-t border-slate-200/50 pt-3 font-mono">
+                                  <span>Socio ID: {row.uid ? row.uid.substring(0, 12) : "directo"}</span>
+                                  <span>
+                                    {row.updatedAt 
+                                      ? `Registro: ${new Date(row.updatedAt.seconds ? row.updatedAt.seconds * 1000 : (row.updatedAt._seconds ? row.updatedAt._seconds * 1000 : row.updatedAt)).toLocaleDateString()}`
+                                      : "Seeding"}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Challenge Creator Form */}
+                    <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xs border border-[#EBE6DE] animate-in fade-in duration-300">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-2xl">✨</span>
+                        <h3 className="text-lg font-extrabold text-[#5A6344] tracking-tight">
+                          Cargar Nuevo Desafío en FuerteEnCristo
+                        </h3>
+                      </div>
+                      <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+                        Redacta y carga desafíos para que los miembros de pago de la iglesia participen, acumulen puntos espirituales y compitan fraternalmente en el Ranking de la Hermandad.
+                      </p>
+
+                      <form onSubmit={handleCreateChallenge} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] uppercase font-extrabold text-slate-400 mb-1">Nombre del Desafío</label>
+                            <input
+                              type="text"
+                              value={newChallengeTitle}
+                              onChange={(e) => setNewChallengeTitle(e.target.value)}
+                              placeholder="Ej: 40 Sentadillas de Valentía"
+                              className="w-full bg-[#FAF7F2] p-3.5 rounded-xl border border-[#EBE6DE] text-xs font-bold text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#5A6344]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] uppercase font-extrabold text-slate-400 mb-1">Periodicidad</label>
+                            <select
+                              value={newChallengeType}
+                              onChange={(e) => setNewChallengeType(e.target.value as any)}
+                              className="w-full bg-[#FAF7F2] p-3.5 rounded-xl border border-[#EBE6DE] text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#5A6344]"
+                            >
+                              <option value="diario">☀️ Desafío Diario (Rápido)</option>
+                              <option value="semanal">⚔️ Desafío Semanal (Gran Esfuerzo)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] uppercase font-extrabold text-slate-400 mb-1">Descripción / Palabra de Gozo</label>
+                          <textarea
+                            rows={3}
+                            value={newChallengeDesc}
+                            onChange={(e) => setNewChallengeDesc(e.target.value)}
+                            placeholder="Ej: Dedica 40 sentadillas invocando la fortaleza del Señor. 'Pues te ceñiste de fuerzas para la batalla...' — Salmos 18:39."
+                            className="w-full bg-[#FAF7F2] p-3.5 rounded-xl border border-[#EBE6DE] text-xs font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#5A6344]"
+                          />
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2 border-t border-slate-100 mt-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500 font-bold">Puntos Espirituales:</span>
+                            <input
+                              type="number"
+                              min={5}
+                              max={100}
+                              value={newChallengePoints}
+                              onChange={(e) => setNewChallengePoints(Number(e.target.value) || 10)}
+                              className="w-20 bg-[#FAF7F2] p-2 rounded-lg border border-[#EBE6DE] text-xs font-bold text-center text-[#5A6344]"
+                            />
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={isSubmittingChallenge}
+                            className="w-full sm:w-auto bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] text-xs font-black uppercase tracking-wider px-6 py-3.5 rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            {isSubmittingChallenge ? "Publicando..." : "Publicar Desafío Activo 🚀"}
+                          </button>
+                        </div>
+
+                        {challengeSuccessMsg && (
+                          <div className="bg-emerald-50 text-emerald-800 text-xs p-3 rounded-lg border border-emerald-200 mt-2 font-bold flex items-center gap-2">
+                            <span>✅</span> <span>{challengeSuccessMsg}</span>
+                          </div>
+                        )}
+                        {challengeErrorMsg && (
+                          <div className="bg-red-50 text-red-800 text-xs p-3 rounded-lg border border-red-200 mt-2 font-bold flex items-center gap-2">
+                            <span>⚠️</span> <span>{challengeErrorMsg}</span>
+                          </div>
+                        )}
+                      </form>
+                    </div>
+
+                    {/* Published list */}
+                    <div className="bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE] animate-in fade-in duration-300">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="font-extrabold text-[#5A6344] text-xs uppercase tracking-wider">
+                          Desafíos Vigentes en FuerteEnCristo ({challengesList.length})
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={fetchChallengesList}
+                          className="text-[10px] text-slate-500 hover:text-[#5A6344] flex items-center gap-1 font-bold underline focus:outline-none"
+                        >
+                          <RefreshCw className="w-3 h-3" /> Sincronizar
+                        </button>
+                      </div>
+
+                      {isLoadingChallenges ? (
+                        <p className="text-xs text-center py-6 text-slate-500 font-semibold italic">Sincronizando con Firestore...</p>
+                      ) : challengesList.length === 0 ? (
+                        <div className="text-center py-12 text-slate-400">
+                          <span className="text-4xl block mb-2 font-serif">⚔️</span>
+                          <p className="text-xs font-semibold">No se han registrado desafíos. ¡Añade el primero usando el formulario de arriba!</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {challengesList.map((ch) => (
+                            <div key={ch.id} className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#EBE6DE] flex flex-col justify-between hover:border-slate-300 transition-colors">
+                              <div>
+                                <div className="flex justify-between items-center mb-2">
+                                  <span className={`text-[9px] uppercase font-black px-2.5 py-1 rounded-full border ${
+                                    ch.tipo === "diario" 
+                                      ? "bg-amber-50 text-amber-800 border-amber-200" 
+                                      : "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                  }`}>
+                                    {ch.tipo === "diario" ? "☀️ Diario" : "⚔️ Semanal"}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                                    🪙 {ch.puntos || 10} pts
+                                  </span>
+                                </div>
+                                <h4 className="font-black text-sm text-[#5A6344]">{ch.titulo}</h4>
+                                <p className="text-xs text-slate-600 mt-2 leading-relaxed italic">
+                                  "{ch.descripcion}"
+                                </p>
+                              </div>
+
+                              <div className="flex justify-between items-center border-t border-slate-200/50 pt-3 mt-4 text-[10px]">
+                                <span className="text-slate-400 text-[9px] font-mono">
+                                  Publicado: {ch.createdAt ? new Date(ch.createdAt).toLocaleDateString() : "Justo ahora"}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteChallenge(ch.id)}
+                                  className="text-red-500 hover:text-red-700 font-bold uppercase cursor-pointer"
+                                  title="Eliminar este desafío"
+                                >
+                                  ❌ Eliminar
+                                </button>
                               </div>
                             </div>
-
-                            <div className="flex justify-between items-center text-[10px] text-slate-400 mt-4 border-t border-slate-200/50 pt-3 font-mono">
-                              <span>Socio ID: {row.uid ? row.uid.substring(0, 12) : "directo"}</span>
-                              <span>
-                                {row.updatedAt 
-                                  ? `Registro: ${new Date(row.updatedAt.seconds ? row.updatedAt.seconds * 1000 : (row.updatedAt._seconds ? row.updatedAt._seconds * 1000 : row.updatedAt)).toLocaleDateString()}`
-                                  : "Seeding"}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
               </div>
             ) : (
               <>
-                {/* BIG PUNCHY CALL TO ACTION BAR TO TRIGGER THE GUIDED PLAYER SCREEN */}
-            <div className="mb-8 bg-gradient-to-r from-[#5A6344] to-[#484f36] rounded-3xl p-6 md:p-8 text-white shadow-lg flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden">
+                {/* Visual Tab Bar Selector for All Customers (Premium features active for pago/max, teased for trial) */}
+                <div className="flex bg-white p-1 rounded-2xl border border-[#D9D3C7] shadow-xs max-w-xl mx-auto gap-1 mb-8 animate-in fade-in duration-300">
+                  <button
+                    type="button"
+                    onClick={() => setActiveDashboardTab("plan")}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-3 text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none ${
+                      activeDashboardTab === "plan"
+                        ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                        : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                    }`}
+                  >
+                    📖 Mi Plan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDashboardTab("desafios")}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-3 text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none ${
+                      activeDashboardTab === "desafios"
+                        ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                        : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                    }`}
+                  >
+                    ⚔️ Desafíos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDashboardTab("ranking")}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-3 text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none ${
+                      activeDashboardTab === "ranking"
+                        ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                        : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                    }`}
+                  >
+                    🏆 Ranking
+                  </button>
+                </div>
+
+                {/* If typical trial user tries to access premium sections, show preeminent padlocked upsell card */}
+                {activeDashboardTab !== "plan" && user?.tipoCuenta !== "pago" && user?.apellido !== "max" ? (
+                  <div className="bg-white rounded-3xl p-8 md:p-12 shadow-lg border border-[#D9D3C7] text-center max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300 my-8">
+                    <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center text-3xl border border-amber-200 mx-auto animate-bounce">
+                      ⭐
+                    </div>
+                    
+                    <h3 className="text-2xl font-black text-[#5A6344] tracking-tight">
+                      Módulo Exclusivo para Clientes Premium
+                    </h3>
+                    
+                    <p className="text-sm font-serif italic text-slate-600 leading-relaxed max-w-md mx-auto">
+                      "Mas el fin de todas las cosas se acerca; sed, pues, sobrios, y velad en oración." — 1 Pedro 4:7
+                    </p>
+                    
+                    <div className="p-5 bg-[#FAF7F2] rounded-2xl text-left border border-[#D9D3C7] space-y-3">
+                      <h4 className="font-extrabold text-[#8B6E4E] text-xs uppercase tracking-wide">
+                        🌟 Beneficios Premium de FuerteEnCristo:
+                      </h4>
+                      <ul className="text-xs text-slate-600 space-y-2">
+                        <li className="flex items-center gap-1.5">
+                          <span className="text-[#5A6344]">⚔️</span> <span><strong>Desafíos Diarios y Semanales</strong> para retar tu mente, cuerpo y espíritu con reflexiones y metas concretas.</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          <span className="text-[#5A6344]">🏆</span> <span><strong>Ranking de la Hermandad (Leaderboard)</strong> para competir fraternalmente, manteniendo la constancia con rachas y desafíos superados.</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          <span className="text-[#5A6344]">🔥</span> <span><strong>Motivación Constante</strong> para vencer la procrastinación en comunidad con otros siervos perseverantes.</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    <p className="text-xs text-slate-400">
+                      Tu suscripción actual es una <strong>Prueba Temporal de 3 Días</strong>. Para habilitar los Desafíos y el Ranking, por favor comunícate con el instructor principal (Max) para activar tu plan Premium ilimitado.
+                    </p>
+                  </div>
+                ) : null}
+
+                {/* Challenges active layout for premium/max */}
+                {activeDashboardTab === "desafios" && (user?.tipoCuenta === "pago" || user?.apellido === "max") && (
+                  <div className="space-y-6 animate-in fade-in duration-300">
+                    
+                    {/* Check-In Racha block */}
+                    <div className="bg-gradient-to-r from-amber-500/10 to-amber-600/5 p-6 rounded-3xl border border-amber-200/60 flex flex-col sm:flex-row justify-between items-center gap-4">
+                      <div className="flex items-center gap-4">
+                        <span className="text-4xl animate-pulse">🔥</span>
+                        <div>
+                          <h3 className="font-black text-base text-[#8B6E4E]">Racha del Espíritu Santo</h3>
+                          <p className="text-xs text-slate-500 leading-relaxed font-semibold">
+                            Llevas <span className="text-[#8B6E4E] text-sm font-extrabold">{user?.rachaDias || 0}</span> {user?.rachaDias === 1 ? "día seguido" : "días seguidos"} reportando tu sudor y devocional.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleRegisterDailyStreak}
+                        className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-[#FAF7F2] text-xs font-black uppercase tracking-wider py-3.5 px-6 rounded-xl shadow-xs cursor-pointer transition-colors"
+                      >
+                        🔥 Reportar Sudor y Fe de Hoy
+                      </button>
+                    </div>
+
+                    {/* Challenges active layout */}
+                    <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xs border border-[#EBE6DE] space-y-6">
+                      <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                        <div>
+                          <h3 className="text-lg font-extrabold text-[#5A6344] tracking-tight">Desafíos Disponibles</h3>
+                          <p className="text-xs text-slate-500">Supera desafíos espirituales y físicos para acumular constancia en el Ranking.</p>
+                        </div>
+                        <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                          ⚔️ {user?.desafiosSuperadosCount || 0} completados
+                        </span>
+                      </div>
+
+                      {challengesList.length === 0 ? (
+                        <div className="text-center py-12 text-slate-400">
+                          <span className="text-4xl block mb-2 font-serif">⚔️</span>
+                          <p className="text-xs font-semibold">No hay desafíos activos en este momento. El pastor Max cargará más pronto.</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {challengesList.map((ch) => {
+                            const isCompleted = (user?.desafiosCompletadosIds || []).includes(ch.id);
+                            return (
+                              <div 
+                                key={ch.id} 
+                                className={`p-5 rounded-2xl border transition-all flex flex-col justify-between ${
+                                  isCompleted 
+                                    ? "bg-slate-50/70 border-slate-200/50 opacity-80" 
+                                    : "bg-[#FAF7F2] border-[#EBE6DE] hover:border-slate-300"
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex justify-between items-center mb-2">
+                                    <span className={`text-[9px] uppercase font-black px-2.5 py-1 rounded-full border ${
+                                      ch.tipo === "diario" 
+                                        ? "bg-amber-50 text-amber-800 border-amber-200" 
+                                        : "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                    }`}>
+                                      {ch.tipo === "diario" ? "☀️ Diario" : "⚔️ Semanal"}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-100">
+                                      🪙 {ch.puntos || 10} pts
+                                    </span>
+                                  </div>
+                                  <h4 className="font-extrabold text-[#5A6344] text-sm">{ch.titulo}</h4>
+                                  <p className="text-xs text-slate-600 mt-2 leading-relaxed italic">
+                                    "{ch.descripcion}"
+                                  </p>
+                                </div>
+
+                                <div className="border-t border-slate-200/40 pt-3 mt-4 flex items-center justify-between">
+                                  <span className="text-[9px] text-slate-400">
+                                    Publicado: {ch.createdAt ? new Date(ch.createdAt).toLocaleDateString() : "Reciente"}
+                                  </span>
+
+                                  {isCompleted ? (
+                                    <span className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-200 px-3 py-1 rounded-lg font-bold flex items-center gap-1 uppercase">
+                                      ✨ ¡SUPERADO!
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCompleteChallenge(ch.id)}
+                                      className="bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] text-[10px] uppercase font-black tracking-wider px-3.5 py-1.5 rounded-lg shadow-3xs cursor-pointer transition-colors"
+                                    >
+                                      ✅ Marcar Superado
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Ranking active layout for premium/max */}
+                {activeDashboardTab === "ranking" && (user?.tipoCuenta === "pago" || user?.apellido === "max") && (
+                  <div className="space-y-6 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xs border border-[#EBE6DE]">
+                      
+                      <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-4">
+                        <div>
+                          <h3 className="text-lg font-extrabold text-[#5A6344] tracking-tight">🏆 Ranking de la Hermandad</h3>
+                          <p className="text-xs text-slate-500">Mantenemos una competencia sana y fraternal para perseverar en el templo del Señor.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={fetchRegisteredUsers}
+                          className="flex items-center gap-1 py-1.5 px-3 bg-[#FAF7F2] border border-[#EBE6DE] rounded-xl text-xs text-slate-500 hover:text-[#5A6344] font-bold cursor-pointer"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Actualizar
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-[#EBE6DE] text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
+                              <th className="py-3 px-3">Lugar</th>
+                              <th className="py-3 px-3">Hermano/a</th>
+                              <th className="py-3 px-3 text-center">Racha Actual 🔥</th>
+                              <th className="py-3 px-3 text-right">Desafíos Superados ⚔️</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              const rankingUsers = [...registeredUsersList];
+                              rankingUsers.sort((a, b) => {
+                                const countA = a.desafiosSuperadosCount || 0;
+                                const countB = b.desafiosSuperadosCount || 0;
+                                if (countB !== countA) return countB - countA;
+                                return (b.rachaDias || 0) - (a.rachaDias || 0);
+                              });
+
+                              return rankingUsers.map((u, i) => {
+                                let badge = "";
+                                if (i === 0) badge = "🥇";
+                                else if (i === 1) badge = "🥈";
+                                else if (i === 2) badge = "🥉";
+                                else badge = `${i + 1}º`;
+
+                                const isSelf = u.uid === user?.uid;
+
+                                return (
+                                  <tr 
+                                    key={u.uid || i} 
+                                    className={`border-b border-slate-100 text-xs font-semibold ${
+                                      isSelf ? "bg-[#5A6344]/5 font-bold text-[#5A6344]" : "text-slate-700"
+                                    }`}
+                                  >
+                                    <td className="py-3.5 px-3 font-black text-center text-sm w-12">{badge}</td>
+                                    <td className="py-3.5 px-3">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-extrabold text-sm">{u.userName || "Siervo Fiel"}</span>
+                                        {isSelf && (
+                                          <span className="text-[9px] bg-[#5A6344]/20 text-[#5A6344] px-1.5 py-0.5 rounded uppercase font-black tracking-wider">
+                                            Tú
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span className="text-[9px] text-slate-400 capitalize block font-mono mt-0.5">
+                                        Sendero: {u.selectedRouteType || "suave"}
+                                      </span>
+                                    </td>
+                                    <td className="py-3.5 px-3 text-center text-amber-600 font-extrabold text-sm">
+                                      🔥 {u.rachaDias || 0} {u.rachaDias === 1 ? "día" : "días"}
+                                    </td>
+                                    <td className="py-3.5 px-3 text-right text-emerald-700 font-extrabold text-sm">
+                                      ⚔️ {u.desafiosSuperadosCount || 0} completados
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Main Client Workout Route & Routine Plans ONLY shown when "plan" tab is selected */}
+                {activeDashboardTab === "plan" && (
+                  <>
+                    {/* BIG PUNCHY CALL TO ACTION BAR TO TRIGGER THE GUIDED PLAYER SCREEN */}
+                    <div className="mb-8 bg-gradient-to-r from-[#5A6344] to-[#484f36] rounded-3xl p-6 md:p-8 text-white shadow-lg flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden">
               <span className="absolute top-2 right-4 text-9xl opacity-10 select-none font-serif font-bold italic">FC</span>
               
               <div className="z-10 text-center md:text-left">
@@ -1891,7 +2511,9 @@ export default function App() {
           </>
         )}
 
-      </div>
+      </>
+    )}
+  </div>
 
           {/* Footer content */}
           <footer className="bg-white border-t border-[#D9D3C7] py-12 mt-12 text-center text-slate-500">

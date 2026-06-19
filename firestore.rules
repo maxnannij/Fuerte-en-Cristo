@@ -4,5 +4,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if true;
     }
+    match /challenges/{challengeId} {
+      allow read, write: if true;
+    }
   }
 }
