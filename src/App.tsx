@@ -329,6 +329,14 @@ export default function App() {
   const [showInstallHelp, setShowInstallHelp] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
+  // Helper to identify if user is Max or Nanni (Master/Instructor)
+  const isMasterUser = (u: any): boolean => {
+    if (!u) return false;
+    const ape = String(u.apellido || "").trim().toLowerCase();
+    const name = String(u.userName || "").trim().toLowerCase();
+    return ape === "max" || ape === "nanni" || ape === "nannij" || name === "max" || name.includes("max nanni");
+  };
+
   const handleCopyLink = () => {
     // Try to copy the correct address, fallback to a neat string or direct URL
     const cleanUrl = window.location.href;
@@ -435,8 +443,8 @@ export default function App() {
     }
   };
 
-  // Master Administrator active sub-tab (For Max: directory of members vs. challenges manager)
-  const [activeAdminTab, setActiveAdminTab] = useState<"socios" | "desafios">("socios");
+  // Master Administrator active sub-tab (For Max: directory of members vs. challenges manager vs. pupil custom previewer)
+  const [activeAdminTab, setActiveAdminTab] = useState<"socios" | "desafios" | "vistas">("socios");
 
   // Premium client tab
   const [activeDashboardTab, setActiveDashboardTab] = useState<"plan" | "desafios" | "ranking">("plan");
@@ -646,6 +654,23 @@ export default function App() {
             updatedAt: serverTimestamp()
           });
           console.log("Master user 'max' successfully seeded!");
+        }
+
+        const nanniUserRef = doc(db, "users", "nanni");
+        const nanniSnap = await getDoc(nanniUserRef);
+        if (!nanniSnap.exists()) {
+          console.log("Seeding Master user 'nanni' into Firestore...");
+          await setDoc(nanniUserRef, {
+            apellido: "nanni",
+            password: "master!!!",
+            userName: "Max Nanni",
+            selectedRouteType: "fuerza",
+            checkedExercises: {},
+            lastLoginDate: "",
+            tipoCuenta: "pago",
+            updatedAt: serverTimestamp()
+          });
+          console.log("Master user 'nanni' successfully seeded!");
         }
       } catch (err) {
         console.warn("Could not seed default users:", err);
@@ -1465,7 +1490,7 @@ export default function App() {
 
               {/* Mini User Summary Badge */}
               <div className="flex flex-wrap items-center gap-3">
-                {user?.apellido === "max" && (
+                {isMasterUser(user) && (
                   <button 
                     type="button"
                     onClick={() => {
@@ -1511,7 +1536,7 @@ export default function App() {
                   </button>
                 </div>
 
-                {user?.apellido !== "max" && (
+                {!isMasterUser(user) && (
                   <div className="flex items-center gap-2 bg-[#FAF7F2] p-2 rounded-xl border border-[#EBE6DE] text-xs font-semibold">
                     <span>Sendero: <strong className="text-[#5A6344] uppercase">{selectedRouteType}</strong></span>
                     <button 
@@ -1550,15 +1575,15 @@ export default function App() {
           </div>
 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-12">
-            {user?.apellido === "max" ? (
+            {isMasterUser(user) && activeAdminTab !== "vistas" ? (
               <div className="space-y-8 animate-in fade-in duration-300">
                 
                 {/* Admin Tab Switcher */}
-                <div className="flex border-b border-[#EBE6DE] gap-4 mb-2">
+                <div className="flex border-b border-[#EBE6DE] gap-4 mb-2 overflow-x-auto pb-1">
                   <button
                     type="button"
                     onClick={() => setActiveAdminTab("socios")}
-                    className={`pb-3 text-xs sm:text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer focus:outline-none ${
+                    className={`pb-3 text-xs sm:text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
                       activeAdminTab === "socios"
                         ? "border-[#5A6344] text-[#5A6344]"
                         : "border-transparent text-slate-400 hover:text-slate-600"
@@ -1569,13 +1594,24 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setActiveAdminTab("desafios")}
-                    className={`pb-3 text-xs sm:text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer focus:outline-none ${
+                    className={`pb-3 text-xs sm:text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
                       activeAdminTab === "desafios"
                         ? "border-[#5A6344] text-[#5A6344]"
                         : "border-transparent text-slate-400 hover:text-slate-600"
                     }`}
                   >
                     ⚔️ Crear y Administrar Desafíos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveAdminTab("vistas")}
+                    className={`pb-3 text-xs sm:text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
+                      activeAdminTab === "vistas"
+                        ? "border-[#5A6344] text-[#5A6344]"
+                        : "border-transparent text-slate-400 hover:text-slate-600"
+                    }`}
+                  >
+                    💪 Vista de Hermano
                   </button>
                 </div>
 
@@ -1943,6 +1979,28 @@ export default function App() {
               </div>
             ) : (
               <>
+                {/* Master quick toggle banner */}
+                {isMasterUser(user) && (
+                  <div className="bg-amber-500/10 border-2 border-dashed border-amber-500/35 p-4 rounded-3xl mb-8 flex flex-col sm:flex-row justify-between items-center gap-4 animate-in fade-in duration-300">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">👀</span>
+                      <div>
+                        <h4 className="font-extrabold text-amber-800 text-sm">Vista de Alumno/Hermano Activa</h4>
+                        <p className="text-xs text-amber-700/90 leading-relaxed font-semibold">
+                          Como instructor principal, aquí puedes ver y testear los ejercicios tal cual los visualizan tus alumnos.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveAdminTab("socios")}
+                      className="w-full sm:w-auto bg-[#5A6344] hover:bg-[#484f36] active:scale-95 text-white font-extrabold text-xs uppercase px-5 py-3 rounded-xl transition-all shadow-md cursor-pointer border border-[#484f36] focus:outline-none"
+                    >
+                      🛡️ Volver al Panel Master
+                    </button>
+                  </div>
+                )}
+
                 {/* Visual Tab Bar Selector for All Customers (Premium features active for pago/max, teased for trial) */}
                 <div className="flex bg-white p-1 rounded-2xl border border-[#D9D3C7] shadow-xs max-w-xl mx-auto gap-1 mb-8 animate-in fade-in duration-300">
                   <button
@@ -1981,7 +2039,7 @@ export default function App() {
                 </div>
 
                 {/* If typical trial user tries to access premium sections, show preeminent padlocked upsell card */}
-                {activeDashboardTab !== "plan" && user?.tipoCuenta !== "pago" && user?.apellido !== "max" ? (
+                {activeDashboardTab !== "plan" && user?.tipoCuenta !== "pago" && !isMasterUser(user) ? (
                   <div className="bg-white rounded-3xl p-8 md:p-12 shadow-lg border border-[#D9D3C7] text-center max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300 my-8">
                     <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center text-3xl border border-amber-200 mx-auto animate-bounce">
                       ⭐
@@ -2019,7 +2077,7 @@ export default function App() {
                 ) : null}
 
                 {/* Challenges active layout for premium/max */}
-                {activeDashboardTab === "desafios" && (user?.tipoCuenta === "pago" || user?.apellido === "max") && (
+                {activeDashboardTab === "desafios" && (user?.tipoCuenta === "pago" || isMasterUser(user)) && (
                   <div className="space-y-6 animate-in fade-in duration-300">
                     
                     {/* Check-In Racha block */}
@@ -2121,7 +2179,7 @@ export default function App() {
                 )}
 
                 {/* Ranking active layout for premium/max */}
-                {activeDashboardTab === "ranking" && (user?.tipoCuenta === "pago" || user?.apellido === "max") && (
+                {activeDashboardTab === "ranking" && (user?.tipoCuenta === "pago" || isMasterUser(user)) && (
                   <div className="space-y-6 animate-in fade-in duration-300">
                     <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xs border border-[#EBE6DE]">
                       
