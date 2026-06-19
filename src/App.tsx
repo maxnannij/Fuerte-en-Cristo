@@ -410,7 +410,7 @@ export default function App() {
   const [newUserApellido, setNewUserApellido] = useState<string>("");
   const [newUserName, setNewUserName] = useState<string>("");
   const [newUserPassword, setNewUserPassword] = useState<string>("");
-  const [newUserAccountType, setNewUserAccountType] = useState<"prueba" | "pago">("pago");
+  const [newUserAccountType, setNewUserAccountType] = useState<"prueba" | "pago" | "premium">("pago");
   const [newUserRoute, setNewUserRoute] = useState<"suave" | "rodillas" | "fuerza" | "legendario">("suave");
   const [isAddingUser, setIsAddingUser] = useState<boolean>(false);
   const [addUserSuccess, setAddUserSuccess] = useState<string>("");
@@ -440,6 +440,35 @@ export default function App() {
       console.error("Error fetching registered users:", err);
     } finally {
       setIsLoadingUsersList(false);
+    }
+  };
+
+  const handleUpdateUserPlan = async (userUid: string, newPlan: "prueba" | "pago" | "premium") => {
+    try {
+      const userRef = doc(db, "users", userUid);
+      const expirationMillis = newPlan === "prueba"
+        ? Date.now() + 3 * 24 * 60 * 60 * 1000
+        : null;
+      
+      await updateDoc(userRef, {
+        tipoCuenta: newPlan,
+        fechaVencimiento: expirationMillis,
+        updatedAt: serverTimestamp()
+      });
+      
+      setRegisteredUsersList(prev => prev.map(u => {
+        if (u.uid === userUid) {
+          return {
+            ...u,
+            tipoCuenta: newPlan,
+            fechaVencimiento: expirationMillis
+          };
+        }
+        return u;
+      }));
+    } catch (err: any) {
+      console.error("Error updating user plan:", err);
+      alert("Hubo un error al actualizar el plan del afiliado de fe.");
     }
   };
 
@@ -1647,9 +1676,9 @@ export default function App() {
                     </div>
 
                     {/* Statistics bento grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-xl border border-slate-100">👥</div>
+                        <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-xl border border-slate-100 font-bold text-slate-500">👥</div>
                         <div>
                           <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Registrados</span>
                           <strong className="text-xl md:text-2xl font-black text-[#5A6344] block">
@@ -1659,9 +1688,19 @@ export default function App() {
                       </div>
 
                       <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-xl border border-emerald-100">🟢</div>
+                        <div className="w-12 h-12 rounded-2xl bg-amber-50/50 flex items-center justify-center text-xl border border-amber-100 font-bold text-amber-500">⏳</div>
                         <div>
-                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Usuarios de Pago</span>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Pruebas Temporales</span>
+                          <strong className="text-xl md:text-2xl font-black text-amber-700 block">
+                            {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "prueba").length}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-xl border border-emerald-100 font-bold text-emerald-500">🟢</div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Pago Básico</span>
                           <strong className="text-xl md:text-2xl font-black text-emerald-700 block">
                             {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "pago").length}
                           </strong>
@@ -1669,11 +1708,11 @@ export default function App() {
                       </div>
 
                       <div className="bg-white p-5 rounded-3xl border border-[#EBE6DE] shadow-3xs flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-amber-50/50 flex items-center justify-center text-xl border border-amber-100">⏳</div>
+                        <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center text-xl border border-amber-200 font-bold text-amber-600">⭐</div>
                         <div>
-                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Pruebas Temporales</span>
-                          <strong className="text-xl md:text-2xl font-black text-amber-700 block">
-                            {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "prueba").length}
+                          <span className="text-[10px] text-teal-500 font-extrabold uppercase tracking-wider block">Plan Premium</span>
+                          <strong className="text-xl md:text-2xl font-black text-[#5A6344] block">
+                            {isLoadingUsersList ? "..." : registeredUsersList.filter(u => u.tipoCuenta === "premium").length}
                           </strong>
                         </div>
                       </div>
@@ -1711,23 +1750,28 @@ export default function App() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {registeredUsersList.map((row, index) => {
                             const isTrial = row.tipoCuenta === "prueba";
+                            const isPremium = row.tipoCuenta === "premium";
                             
                             // Vigencia helper
-                            let vigText = "Usuario Pago";
+                            let vigText = "Pago Básico";
                             let vigColor = "bg-emerald-50 text-emerald-800 border-emerald-200";
-                            if (isTrial) {
+                            
+                            if (isPremium) {
+                              vigText = "Premium ⭐";
+                              vigColor = "bg-[#5A6344]/15 text-[#5A6344] border-[#5A6344]/40 font-black";
+                            } else if (isTrial) {
                               if (row.fechaVencimiento) {
                                 const remains = row.fechaVencimiento - Date.now();
                                 if (remains <= 0) {
-                                  vigText = "Prueba Vencida (Expirado)";
-                                  vigColor = "bg-red-50 text-red-800 border-red-200";
+                                  vigText = "Prueba Vencida";
+                                  vigColor = "bg-red-50 text-red-800 border-red-200 font-bold";
                                 } else {
                                   const daysLeft = Math.ceil(remains / (24 * 60 * 60 * 1000));
-                                  vigText = `Prueba Activa (${daysLeft} ${daysLeft === 1 ? "día" : "días"} de gracia restante)`;
-                                  vigColor = "bg-amber-50 text-amber-800 border-amber-200 font-semibold";
+                                  vigText = `Prueba (${daysLeft}d)`;
+                                  vigColor = "bg-amber-50 text-amber-800 border-amber-200 font-bold animate-pulse";
                                 }
                               } else {
-                                vigText = "Prueba Temporal (3 Días)";
+                                vigText = "Prueba (3 días)";
                                 vigColor = "bg-amber-50 text-amber-800 border-amber-200";
                               }
                             }
@@ -1761,7 +1805,7 @@ export default function App() {
                                         Apellido: <strong className="text-slate-600 font-semibold uppercase">{row.apellido || "N/A"}</strong>
                                       </span>
                                     </div>
-                                    <span className={`text-[10px] px-2.5 py-1 font-extrabold rounded-full border ${vigColor}`}>
+                                    <span className={`text-[10px] px-2.5 py-1 font-extrabold rounded-full border uppercase tracking-wider ${vigColor}`}>
                                       {vigText}
                                     </span>
                                   </div>
@@ -1800,12 +1844,55 @@ export default function App() {
 
                                     {row.fechaVencimiento && (
                                       <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200/50 pt-2">
-                                        <span className="font-semibold text-[10px] uppercase text-slate-400">Expiración:</span>
-                                        <span className="font-bold text-slate-700">
-                                          {new Date(row.fechaVencimiento).toLocaleDateString()}
+                                        <span className="font-semibold text-[10px] uppercase text-slate-400">Expiración Prueba:</span>
+                                        <span className="font-bold text-red-700 font-mono">
+                                          {new Date(row.fechaVencimiento).toLocaleDateString()} {new Date(row.fechaVencimiento).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                         </span>
                                       </div>
                                     )}
+
+                                    {/* Action to change account type */}
+                                    <div className="border-t border-slate-200/50 pt-3 mt-3">
+                                      <span className="block text-[10px] uppercase font-extrabold text-slate-400 tracking-wider mb-2">Asignación de Plan:</span>
+                                      <div className="grid grid-cols-3 gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleUpdateUserPlan(row.uid, "prueba")}
+                                          className={`py-2 px-1 text-[9px] font-black uppercase rounded-xl border transition-all cursor-pointer text-center whitespace-nowrap ${
+                                            row.tipoCuenta === "prueba"
+                                              ? "bg-amber-500 text-white border-amber-600 shadow-xs scale-98"
+                                              : "bg-white text-slate-500 border-slate-200 hover:border-amber-300 hover:text-amber-700"
+                                          }`}
+                                          title="Prueba Temporal de 3 días"
+                                        >
+                                          ⏳ Prueba
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleUpdateUserPlan(row.uid, "pago")}
+                                          className={`py-2 px-1 text-[9px] font-black uppercase rounded-xl border transition-all cursor-pointer text-center whitespace-nowrap ${
+                                            row.tipoCuenta === "pago"
+                                              ? "bg-emerald-600 text-white border-emerald-700 shadow-xs scale-98"
+                                              : "bg-white text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-700"
+                                          }`}
+                                          title="Pago Básico (Solo Ejercicios)"
+                                        >
+                                          🟢 Básico
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleUpdateUserPlan(row.uid, "premium")}
+                                          className={`py-2 px-1 text-[9px] font-black uppercase rounded-xl border transition-all cursor-pointer text-center whitespace-nowrap ${
+                                            row.tipoCuenta === "premium"
+                                              ? "bg-[#5A6344] text-white border-[#484f36] shadow-xs scale-98"
+                                              : "bg-white text-slate-500 border-slate-200 hover:border-[#5A6344] hover:text-[#5A6344]"
+                                          }`}
+                                          title="Premium (Acceso Ilimitado Completo)"
+                                        >
+                                          ⭐ Premium
+                                        </button>
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
 
@@ -2038,8 +2125,8 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* If typical trial user tries to access premium sections, show preeminent padlocked upsell card */}
-                {activeDashboardTab !== "plan" && user?.tipoCuenta !== "pago" && !isMasterUser(user) ? (
+                {/* If typical trial user or standard paid user tries to access premium sections, show preeminent padlocked upsell card */}
+                {activeDashboardTab !== "plan" && user?.tipoCuenta !== "premium" && !isMasterUser(user) ? (
                   <div className="bg-white rounded-3xl p-8 md:p-12 shadow-lg border border-[#D9D3C7] text-center max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300 my-8">
                     <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center text-3xl border border-amber-200 mx-auto animate-bounce">
                       ⭐
@@ -2071,13 +2158,17 @@ export default function App() {
                     </div>
 
                     <p className="text-xs text-slate-400">
-                      Tu suscripción actual es una <strong>Prueba Temporal de 3 Días</strong>. Para habilitar los Desafíos y el Ranking, por favor comunícate con el instructor principal (Max) para activar tu plan Premium ilimitado.
+                      {user?.tipoCuenta === "pago" ? (
+                        <span>Tu cuenta actual es el <strong>Plan Básico (Solo Ejercicios)</strong>. Para habilitar los Desafíos y el Ranking de la Hermandad, por favor comunícate con el instructor principal (Max) para actualizar a un plan <strong>Premium</strong>.</span>
+                      ) : (
+                        <span>Tu cuenta actual es una <strong>Prueba Temporal de 3 Días</strong>. Para habilitar los Desafíos y el Ranking de la Hermandad, por favor comunícate con el instructor principal (Max) para activar tu plan <strong>Premium</strong> ilimitado.</span>
+                      )}
                     </p>
                   </div>
                 ) : null}
 
                 {/* Challenges active layout for premium/max */}
-                {activeDashboardTab === "desafios" && (user?.tipoCuenta === "pago" || isMasterUser(user)) && (
+                {activeDashboardTab === "desafios" && (user?.tipoCuenta === "premium" || isMasterUser(user)) && (
                   <div className="space-y-6 animate-in fade-in duration-300">
                     
                     {/* Check-In Racha block */}
@@ -2179,7 +2270,7 @@ export default function App() {
                 )}
 
                 {/* Ranking active layout for premium/max */}
-                {activeDashboardTab === "ranking" && (user?.tipoCuenta === "pago" || isMasterUser(user)) && (
+                {activeDashboardTab === "ranking" && (user?.tipoCuenta === "premium" || isMasterUser(user)) && (
                   <div className="space-y-6 animate-in fade-in duration-300">
                     <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xs border border-[#EBE6DE]">
                       
@@ -2981,7 +3072,7 @@ export default function App() {
                 <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1.5">
                   5. Tipo de Vigencia / Suscripción:
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <label className={`border-2 p-3 rounded-xl flex items-center gap-2 cursor-pointer transition-colors ${
                     newUserAccountType === "prueba" 
                       ? "border-amber-500 bg-amber-50/40 text-amber-900" 
@@ -2996,14 +3087,14 @@ export default function App() {
                       className="accent-[#5A6344]"
                     />
                     <div className="text-left">
-                      <span className="block text-xs font-extrabold uppercase">Prueba Limitada</span>
-                      <span className="text-[10px] text-slate-500 block">Vigente solo por 3 Días</span>
+                      <span className="block text-[10px] font-extrabold uppercase">Prueba (3d)</span>
+                      <span className="text-[9px] text-slate-500 block leading-tight">Vence en 3 Días</span>
                     </div>
                   </label>
 
                   <label className={`border-2 p-3 rounded-xl flex items-center gap-2 cursor-pointer transition-colors ${
                     newUserAccountType === "pago" 
-                      ? "border-[#5A6344] bg-[#5A6344]/5 text-[#5A6344]" 
+                      ? "border-emerald-600 bg-emerald-50/20 text-emerald-900" 
                       : "border-slate-200 hover:border-slate-300 text-slate-600"
                   }`}>
                     <input
@@ -3015,8 +3106,27 @@ export default function App() {
                       className="accent-[#5A6344]"
                     />
                     <div className="text-left">
-                      <span className="block text-xs font-extrabold uppercase">Usuario Pago</span>
-                      <span className="text-[10px] text-slate-500 block">Acceso ilimitado de fe</span>
+                      <span className="block text-[10px] font-extrabold uppercase">Pago Básico</span>
+                      <span className="text-[9px] text-slate-500 block leading-tight">Solo Ejercicios</span>
+                    </div>
+                  </label>
+
+                  <label className={`border-2 p-3 rounded-xl flex items-center gap-2 cursor-pointer transition-colors ${
+                    newUserAccountType === "premium" 
+                      ? "border-[#5A6344] bg-[#5A6344]/5 text-[#5A6344]" 
+                      : "border-slate-200 hover:border-slate-300 text-slate-600"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="newUserAccountType"
+                      value="premium"
+                      checked={newUserAccountType === "premium"}
+                      onChange={() => setNewUserAccountType("premium")}
+                      className="accent-[#5A6344]"
+                    />
+                    <div className="text-left">
+                      <span className="block text-[10px] font-extrabold uppercase">Premium ⭐</span>
+                      <span className="text-[9px] text-slate-500 block leading-tight">Acceso Completo</span>
                     </div>
                   </label>
                 </div>
