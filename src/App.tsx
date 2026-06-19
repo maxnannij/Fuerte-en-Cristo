@@ -334,7 +334,7 @@ export default function App() {
     if (!u) return false;
     const ape = String(u.apellido || "").trim().toLowerCase();
     const name = String(u.userName || "").trim().toLowerCase();
-    return ape === "max" || ape === "nanni" || ape === "nannij" || name === "max" || name.includes("max nanni");
+    return ape === "maxjn";
   };
 
   const handleCopyLink = () => {
