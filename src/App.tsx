@@ -338,6 +338,41 @@ export default function App() {
     return ape === "maxjn";
   };
 
+  // Helper to calculate the Saturday 23:59:59 deadline of the week a challenge was created
+  const getSaturdayDeadlineOf = (createdAt: number): number => {
+    const date = new Date(createdAt);
+    date.setHours(23, 59, 59, 999);
+    const day = date.getDay(); // 0 is Sunday, 1-6 is Monday-Saturday
+    let daysToSaturday = 6 - day;
+    if (day === 0) {
+      // Sunday starts a new active circle, Saturday is 6 days later
+      daysToSaturday = 6;
+    }
+    const saturdayDate = new Date(createdAt + daysToSaturday * 24 * 60 * 60 * 1000);
+    saturdayDate.setHours(23, 59, 59, 999);
+    return saturdayDate.getTime();
+  };
+
+  // Helper to check if a challenge has expired
+  const isChallengeExpired = (ch: any): boolean => {
+    if (!ch.createdAt) return false;
+    const now = Date.now();
+    if (ch.tipo === "diario") {
+      // Daily challenge expires exactly 24 hours after creation
+      return now - ch.createdAt > 24 * 60 * 60 * 1000;
+    }
+    if (ch.tipo === "semanal") {
+      // Weekly challenge expires when the week ends on Saturday at 23:59:59
+      const deadline = getSaturdayDeadlineOf(ch.createdAt);
+      return now > deadline;
+    }
+    if (ch.tipo === "mensual") {
+      // Monthly challenge expires after 30 days of active period
+      return now - ch.createdAt > 30 * 24 * 60 * 60 * 1000;
+    }
+    return false;
+  };
+
   const handleCopyLink = () => {
     // Try to copy the correct address, fallback to a neat string or direct URL
     const cleanUrl = window.location.href;
@@ -505,7 +540,7 @@ export default function App() {
   // States for creating challenges
   const [newChallengeTitle, setNewChallengeTitle] = useState<string>("");
   const [newChallengeDesc, setNewChallengeDesc] = useState<string>("");
-  const [newChallengeType, setNewChallengeType] = useState<"diario" | "semanal">("diario");
+  const [newChallengeType, setNewChallengeType] = useState<"diario" | "semanal" | "mensual">("diario");
   const [newChallengePoints, setNewChallengePoints] = useState<number>(10);
   const [isSubmittingChallenge, setIsSubmittingChallenge] = useState<boolean>(false);
   const [challengeSuccessMsg, setChallengeSuccessMsg] = useState<string>("");
@@ -1224,6 +1259,14 @@ export default function App() {
     );
   }
 
+  // Segment challenges into active/vigentes and expired/historicos based on creation time rules
+  const activeChallenges = challengesList.filter((ch) => !isChallengeExpired(ch));
+  const expiredChallenges = challengesList.filter((ch) => isChallengeExpired(ch));
+
+  const getChallengeCompletionsCount = (challengeId: string): number => {
+    return registeredUsersList.filter(u => (u.desafiosCompletadosIds || []).includes(challengeId)).length;
+  };
+
   return (
     <div className="min-h-screen bg-[#FAF7F2] text-[#2D2A26] font-sans antialiased selection:bg-amber-100 selection:text-amber-900">
 
@@ -1923,6 +1966,7 @@ export default function App() {
                             >
                               <option value="diario">☀️ Desafío Diario (Rápido)</option>
                               <option value="semanal">⚔️ Desafío Semanal (Gran Esfuerzo)</option>
+                              <option value="mensual">👑 Desafío Mensual (Compromiso Mayor)</option>
                             </select>
                           </div>
                         </div>
@@ -1974,71 +2018,157 @@ export default function App() {
                     </div>
 
                     {/* Published list */}
-                    <div className="bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE] animate-in fade-in duration-300">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="font-extrabold text-[#5A6344] text-xs uppercase tracking-wider">
-                          Desafíos Vigentes en FuerteEnCristo ({challengesList.length})
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={fetchChallengesList}
-                          className="text-[10px] text-slate-500 hover:text-[#5A6344] flex items-center gap-1 font-bold underline focus:outline-none"
-                        >
-                          <RefreshCw className="w-3 h-3" /> Sincronizar
-                        </button>
+                    <div className="space-y-6">
+                      <div className="bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE] animate-in fade-in duration-300">
+                        <div className="flex justify-between items-center mb-4">
+                          <h3 className="font-extrabold text-[#5A6344] text-xs uppercase tracking-wider">
+                            🛡️ Desafíos Activos / Vigentes en FuerteEnCristo ({activeChallenges.length})
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={fetchChallengesList}
+                            className="text-[10px] text-slate-500 hover:text-[#5A6344] flex items-center gap-1 font-bold underline focus:outline-none"
+                          >
+                            <RefreshCw className="w-3 h-3" /> Sincronizar
+                          </button>
+                        </div>
+
+                        {isLoadingChallenges ? (
+                          <p className="text-xs text-center py-6 text-slate-500 font-semibold italic">Sincronizando con Firestore...</p>
+                        ) : activeChallenges.length === 0 ? (
+                          <div className="text-center py-12 text-slate-400">
+                            <span className="text-4xl block mb-2 font-serif">⚡</span>
+                            <p className="text-xs font-semibold">No hay desafíos vigentes creados o todos han vencido cronológicamente.</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {activeChallenges.map((ch) => (
+                              <div key={ch.id} className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#EBE6DE] flex flex-col justify-between hover:border-slate-300 transition-colors">
+                                <div>
+                                  <div className="flex justify-between items-center mb-2">
+                                    <span className={`text-[9px] uppercase font-black px-2.5 py-1 rounded-full border ${
+                                      ch.tipo === "diario" 
+                                        ? "bg-amber-50 text-amber-800 border-amber-200" 
+                                        : ch.tipo === "semanal"
+                                        ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                        : "bg-purple-50 text-purple-800 border-purple-200"
+                                    }`}>
+                                      {ch.tipo === "diario" ? "☀️ Diario" : ch.tipo === "semanal" ? "⚔️ Semanal" : "👑 Mensual"}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-100">
+                                      🪙 {ch.puntos || 10} pts
+                                    </span>
+                                  </div>
+                                  <h4 className="font-extrabold text-sm text-[#5A6344]">{ch.titulo}</h4>
+                                  <p className="text-xs text-slate-600 mt-2 leading-relaxed italic">
+                                    "{ch.descripcion}"
+                                  </p>
+                                </div>
+
+                                <div className="flex justify-between items-center border-t border-slate-200/50 pt-3 mt-4 text-[10px]">
+                                  <div className="flex flex-col text-left">
+                                    <span className="text-slate-400 text-[9px] font-mono">
+                                      Publicado: {ch.createdAt ? new Date(ch.createdAt).toLocaleDateString() : "Justo ahora"}
+                                    </span>
+                                    {ch.tipo === "semanal" && ch.createdAt && (
+                                      <span className="text-red-500 font-extrabold text-[8px] uppercase tracking-wider">
+                                        Vence Sábado: {new Date(getSaturdayDeadlineOf(ch.createdAt)).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteChallenge(ch.id)}
+                                    className="text-red-500 hover:text-red-700 font-bold uppercase cursor-pointer"
+                                    title="Eliminar este desafío"
+                                  >
+                                    ❌ Eliminar
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
-                      {isLoadingChallenges ? (
-                        <p className="text-xs text-center py-6 text-slate-500 font-semibold italic">Sincronizando con Firestore...</p>
-                      ) : challengesList.length === 0 ? (
-                        <div className="text-center py-12 text-slate-400">
-                          <span className="text-4xl block mb-2 font-serif">⚔️</span>
-                          <p className="text-xs font-semibold">No se han registrado desafíos. ¡Añade el primero usando el formulario de arriba!</p>
+                      {/* Historial de Desafíos Vencidos */}
+                      <div className="bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE] animate-in fade-in duration-300">
+                        <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
+                          <div>
+                            <h3 className="font-extrabold text-[#5A6344] text-xs uppercase tracking-wider">
+                              ⏳ Historial de Desafíos Vencidos / Archivados ({expiredChallenges.length})
+                            </h3>
+                            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Archivo de desafíos y hazañas concluidas por tiempo.</p>
+                          </div>
                         </div>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {challengesList.map((ch) => (
-                            <div key={ch.id} className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#EBE6DE] flex flex-col justify-between hover:border-slate-300 transition-colors">
-                              <div>
-                                <div className="flex justify-between items-center mb-2">
-                                  <span className={`text-[9px] uppercase font-black px-2.5 py-1 rounded-full border ${
-                                    ch.tipo === "diario" 
-                                      ? "bg-amber-50 text-amber-800 border-amber-200" 
-                                      : "bg-indigo-50 text-indigo-800 border-indigo-200"
-                                  }`}>
-                                    {ch.tipo === "diario" ? "☀️ Diario" : "⚔️ Semanal"}
-                                  </span>
-                                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
-                                    🪙 {ch.puntos || 10} pts
-                                  </span>
-                                </div>
-                                <h4 className="font-black text-sm text-[#5A6344]">{ch.titulo}</h4>
-                                <p className="text-xs text-slate-600 mt-2 leading-relaxed italic">
-                                  "{ch.descripcion}"
-                                </p>
-                              </div>
 
-                              <div className="flex justify-between items-center border-t border-slate-200/50 pt-3 mt-4 text-[10px]">
-                                <span className="text-slate-400 text-[9px] font-mono">
-                                  Publicado: {ch.createdAt ? new Date(ch.createdAt).toLocaleDateString() : "Justo ahora"}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteChallenge(ch.id)}
-                                  className="text-red-500 hover:text-red-700 font-bold uppercase cursor-pointer"
-                                  title="Eliminar este desafío"
-                                >
-                                  ❌ Eliminar
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                        {isLoadingChallenges ? (
+                          <p className="text-xs text-center py-6 text-slate-500 font-semibold italic">Sincronizando archivo...</p>
+                        ) : expiredChallenges.length === 0 ? (
+                          <div className="text-center py-10 text-slate-400">
+                            <span className="text-3xl block mb-1">⏳</span>
+                            <p className="text-xs font-semibold">No hay desafíos archivados por expiración en este momento.</p>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="border-b border-[#EBE6DE] text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                                  <th className="py-3 px-2">Publicado</th>
+                                  <th className="py-3 px-2">Frecuencia</th>
+                                  <th className="py-3 px-2">Nombre / Desafío</th>
+                                  <th className="py-3 px-2 text-center">Completados</th>
+                                  <th className="py-3 px-2 text-right">Acciones</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {expiredChallenges.map((ch) => {
+                                  const completions = getChallengeCompletionsCount(ch.id);
+                                  return (
+                                    <tr key={ch.id} className="hover:bg-slate-50/50 transition-colors">
+                                      <td className="py-3.5 px-2 font-mono text-[10px] text-slate-500">
+                                        {ch.createdAt ? new Date(ch.createdAt).toLocaleDateString() : "Justo ahora"}
+                                      </td>
+                                      <td className="py-3.5 px-2">
+                                        <span className={`text-[8px] uppercase font-black px-2 py-0.5 rounded-full border ${
+                                          ch.tipo === "diario" 
+                                            ? "bg-amber-50 text-amber-800 border-amber-200" 
+                                            : ch.tipo === "semanal"
+                                            ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                            : "bg-purple-50 text-purple-800 border-purple-200"
+                                        }`}>
+                                          {ch.tipo === "diario" ? "☀️ Diario" : ch.tipo === "semanal" ? "⚔️ Semanal" : "👑 Mensual"}
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-2">
+                                        <span className="font-extrabold text-[#5A6344] block">{ch.titulo}</span>
+                                        <span className="text-[10px] text-slate-500 italic block line-clamp-1 max-w-sm">"{ch.descripcion}"</span>
+                                      </td>
+                                      <td className="py-3.5 px-2 text-center">
+                                        <span className="font-black text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-lg text-[10px]">
+                                          👥 {completions} {completions === 1 ? "Hermano" : "Hermanos"}
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-2 text-right">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteChallenge(ch.id)}
+                                          className="text-red-500 hover:text-red-700 font-extrabold uppercase text-[9px] cursor-pointer"
+                                        >
+                                          Borrar
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
-
               </div>
             ) : (
               <>
@@ -2180,14 +2310,14 @@ export default function App() {
                         </span>
                       </div>
 
-                      {challengesList.length === 0 ? (
+                      {activeChallenges.length === 0 ? (
                         <div className="text-center py-12 text-slate-400">
                           <span className="text-4xl block mb-2 font-serif">⚔️</span>
                           <p className="text-xs font-semibold">No hay desafíos activos en este momento. El pastor Max cargará más pronto.</p>
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {challengesList.map((ch) => {
+                          {activeChallenges.map((ch) => {
                             const isCompleted = (user?.desafiosCompletadosIds || []).includes(ch.id);
                             return (
                               <div 
@@ -2203,9 +2333,11 @@ export default function App() {
                                     <span className={`text-[9px] uppercase font-black px-2.5 py-1 rounded-full border ${
                                       ch.tipo === "diario" 
                                         ? "bg-amber-50 text-amber-800 border-amber-200" 
-                                        : "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                        : ch.tipo === "semanal"
+                                        ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                        : "bg-purple-50 text-purple-800 border-purple-200"
                                     }`}>
-                                      {ch.tipo === "diario" ? "☀️ Diario" : "⚔️ Semanal"}
+                                      {ch.tipo === "diario" ? "☀️ Diario" : ch.tipo === "semanal" ? "⚔️ Semanal" : "👑 Mensual"}
                                     </span>
                                     <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-100">
                                       🪙 {ch.puntos || 10} pts
@@ -2218,9 +2350,16 @@ export default function App() {
                                 </div>
 
                                 <div className="border-t border-slate-200/40 pt-3 mt-4 flex items-center justify-between">
-                                  <span className="text-[9px] text-slate-400">
-                                    Publicado: {ch.createdAt ? new Date(ch.createdAt).toLocaleDateString() : "Reciente"}
-                                  </span>
+                                  <div className="flex flex-col text-left">
+                                    <span className="text-[9px] text-slate-400">
+                                      Publicado: {ch.createdAt ? new Date(ch.createdAt).toLocaleDateString() : "Reciente"}
+                                    </span>
+                                    {ch.tipo === "semanal" && ch.createdAt && (
+                                      <span className="text-red-500 font-extrabold text-[8px] uppercase tracking-wider">
+                                        Vence Sábado: {new Date(getSaturdayDeadlineOf(ch.createdAt)).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </div>
 
                                   {isCompleted ? (
                                     <span className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-200 px-3 py-1 rounded-lg font-bold flex items-center gap-1 uppercase">
@@ -2241,6 +2380,76 @@ export default function App() {
                           })}
                         </div>
                       )}
+
+                      {/* Historial de Desafíos Concluidos / Vencidos for the user */}
+                      <div className="border-t border-slate-100 pt-6 mt-8">
+                        <div className="mb-4">
+                          <h4 className="text-sm font-extrabold text-[#5A6344] uppercase tracking-wider flex items-center gap-1.5">
+                            ⏳ Historial de Desafíos Vencidos ({expiredChallenges.length})
+                          </h4>
+                          <p className="text-xs text-slate-400">Mira las glorias y hazañas concluidas por nuestra hermandad.</p>
+                        </div>
+
+                        {expiredChallenges.length === 0 ? (
+                          <div className="text-center py-6 text-slate-400 text-xs italic">
+                            No hay desafíos concluidos en el archivo histórico todavía.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {expiredChallenges.map((ch) => {
+                              const isCompleted = (user?.desafiosCompletadosIds || []).includes(ch.id);
+                              const completionsCount = getChallengeCompletionsCount(ch.id);
+                              return (
+                                <div 
+                                  key={ch.id} 
+                                  className="p-4 rounded-xl border border-dashed border-slate-200 bg-[#FAF7F2]/50 flex flex-col justify-between opacity-85"
+                                >
+                                  <div>
+                                    <div className="flex justify-between items-center mb-1.5">
+                                      <span className={`text-[8px] uppercase font-black px-2 py-0.5 rounded-full border ${
+                                        ch.tipo === "diario" 
+                                          ? "bg-amber-50 text-amber-800 border-amber-200" 
+                                          : ch.tipo === "semanal"
+                                          ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                          : "bg-purple-50 text-purple-800 border-purple-200"
+                                      }`}>
+                                        {ch.tipo === "diario" ? "☀️ Diario" : ch.tipo === "semanal" ? "⚔️ Semanal" : "👑 Mensual"}
+                                      </span>
+                                      <span className="text-[10px] font-bold text-[#5A6344]">
+                                        🪙 +{ch.puntos || 10} pts
+                                      </span>
+                                    </div>
+                                    <h5 className="font-bold text-[#5A6344] text-xs">{ch.titulo}</h5>
+                                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-2 italic leading-relaxed">
+                                      "{ch.descripcion}"
+                                    </p>
+                                  </div>
+
+                                  <div className="border-t border-slate-200/50 pt-2.5 mt-3 flex items-center justify-between text-[10px]">
+                                    <span className="text-[9px] text-slate-400">
+                                      Publicado el: {ch.createdAt ? new Date(ch.createdAt).toLocaleDateString() : "Pasado"}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[9px] bg-slate-200/65 text-slate-600 px-2 py-0.5 rounded-md font-extrabold uppercase">
+                                        👥 {completionsCount} {completionsCount === 1 ? "Hermano" : "Hermanos"}
+                                      </span>
+                                      {isCompleted ? (
+                                        <span className="text-[9px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md font-bold uppercase">
+                                          Amén 🙏
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-0.5 rounded-md font-bold uppercase">
+                                          No participado
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
