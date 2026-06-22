@@ -669,62 +669,6 @@ export default function App() {
     const initUser = async () => {
       setAuthLoading(true);
 
-      // Quietly seed default users on mount so they're always available out-of-the-box
-      try {
-        const defaultUserRef = doc(db, "users", "perez");
-        const docSnap = await getDoc(defaultUserRef);
-        if (!docSnap.exists()) {
-          console.log("Seeding default user 'perez' into Firestore...");
-          await setDoc(defaultUserRef, {
-            apellido: "perez",
-            password: "fiel123",
-            userName: "Hermano Pérez",
-            selectedRouteType: "suave",
-            checkedExercises: {},
-            lastLoginDate: "",
-            tipoCuenta: "pago",
-            updatedAt: serverTimestamp()
-          });
-          console.log("Default user 'perez' successfully seeded!");
-        }
-
-        const masterUserRef = doc(db, "users", "max");
-        const masterSnap = await getDoc(masterUserRef);
-        if (!masterSnap.exists()) {
-          console.log("Seeding Master user 'max' into Firestore...");
-          await setDoc(masterUserRef, {
-            apellido: "max",
-            password: "master!!!",
-            userName: "Max",
-            selectedRouteType: "fuerza",
-            checkedExercises: {},
-            lastLoginDate: "",
-            tipoCuenta: "pago",
-            updatedAt: serverTimestamp()
-          });
-          console.log("Master user 'max' successfully seeded!");
-        }
-
-        const nanniUserRef = doc(db, "users", "nanni");
-        const nanniSnap = await getDoc(nanniUserRef);
-        if (!nanniSnap.exists()) {
-          console.log("Seeding Master user 'nanni' into Firestore...");
-          await setDoc(nanniUserRef, {
-            apellido: "nanni",
-            password: "master!!!",
-            userName: "Max Nanni",
-            selectedRouteType: "fuerza",
-            checkedExercises: {},
-            lastLoginDate: "",
-            tipoCuenta: "pago",
-            updatedAt: serverTimestamp()
-          });
-          console.log("Master user 'nanni' successfully seeded!");
-        }
-      } catch (err) {
-        console.warn("Could not seed default users:", err);
-      }
-
       // Check if user session is cached in local storage for instant start
       const savedUserStr = localStorage.getItem("fiel_custom_user");
       if (savedUserStr) {
