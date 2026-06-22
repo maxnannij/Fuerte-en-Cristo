@@ -28,7 +28,8 @@ import {
   Eye,
   EyeOff,
   Download,
-  Copy
+  Copy,
+  Trash2
 } from "lucide-react";
 import { WeeklyDayPlan, ExerciseItem, TodayWorkout, PalabraDeFe, PersonalFitnessPlan } from "./types";
 import { ROUTINES_BY_ROUTE_AND_DAY } from "./routines";
@@ -469,6 +470,25 @@ export default function App() {
     } catch (err: any) {
       console.error("Error updating user plan:", err);
       alert("Hubo un error al actualizar el plan del afiliado de fe.");
+    }
+  };
+
+  const handleDeleteUser = async (userUid: string, uName: string) => {
+    if (userUid === user?.uid) {
+      alert("No puedes borrar tu propio usuario de administrador. ¡Es tu llave de acceso!");
+      return;
+    }
+
+    const confirmed = window.confirm(`¿Está seguro de que desea eliminar permanentemente al hermano/a "${uName}"?\nSe borrarán todos sus récords fraternales e historial de ejercicios de la base de datos.`);
+    if (!confirmed) return;
+
+    try {
+      await deleteDoc(doc(db, "users", userUid));
+      setRegisteredUsersList(prev => prev.filter(u => u.uid !== userUid));
+      alert(`Se ha eliminado correctamente al hermano/a "${uName}".`);
+    } catch (err: any) {
+      console.error("Error deleting user:", err);
+      alert("No se pudo eliminar el usuario: " + err.message);
     }
   };
 
@@ -1805,9 +1825,21 @@ export default function App() {
                                         Apellido: <strong className="text-slate-600 font-semibold uppercase">{row.apellido || "N/A"}</strong>
                                       </span>
                                     </div>
-                                    <span className={`text-[10px] px-2.5 py-1 font-extrabold rounded-full border uppercase tracking-wider ${vigColor}`}>
-                                      {vigText}
-                                    </span>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <span className={`text-[10px] px-2.5 py-1 font-extrabold rounded-full border uppercase tracking-wider ${vigColor}`}>
+                                        {vigText}
+                                      </span>
+                                      {row.uid !== user?.uid && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteUser(row.uid, row.userName || "Hermano")}
+                                          className="p-1.5 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 hover:border-red-300 rounded-lg transition-all cursor-pointer flex items-center justify-center shadow-3xs"
+                                          title="Eliminar hermano permanentemente"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
 
                                   <div className="space-y-2 mt-4 text-xs font-sans">
