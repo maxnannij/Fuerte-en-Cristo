@@ -374,6 +374,19 @@ export default function App() {
   const [showInstallBtn, setShowInstallBtn] = useState<boolean>(false);
   const [showInstallHelp, setShowInstallHelp] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [showPwaUpdateBanner, setShowPwaUpdateBanner] = useState<boolean>(false);
+
+  // Listen for Service Worker updates to show a notification banner
+  useEffect(() => {
+    const handlePwaUpdate = () => {
+      console.log("PWA update event received in React!");
+      setShowPwaUpdateBanner(true);
+    };
+    window.addEventListener("pwa-update-ready", handlePwaUpdate);
+    return () => {
+      window.removeEventListener("pwa-update-ready", handlePwaUpdate);
+    };
+  }, []);
 
   // Helper to identify if user is Max or Nanni (Master/Instructor)
   const isMasterUser = (u: any): boolean => {
@@ -3755,6 +3768,44 @@ export default function App() {
 
             </form>
 
+          </div>
+        </div>
+      )}
+
+      {/* Floating PWA Update Notification Banner */}
+      {showPwaUpdateBanner && (
+        <div className="fixed bottom-6 right-6 left-6 md:left-auto md:w-96 bg-white border-2 border-[#D9B99B] rounded-3xl p-5 shadow-2xl z-50 animate-in fade-in slide-in-from-bottom-5 duration-300">
+          <div className="flex gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#5A6344]/10 flex items-center justify-center shrink-0 text-xl">
+              ✨
+            </div>
+            <div className="space-y-1.5 flex-1">
+              <h4 className="text-sm font-extrabold text-[#5A6344] uppercase tracking-wide">
+                ¡Actualización de Fe Lista! 🚀
+              </h4>
+              <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                Hemos incorporado nuevas mejoras y versículos para fortalecer tu rutina diaria. Actualiza ahora para aplicarlos.
+              </p>
+              <div className="flex items-center gap-3 pt-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log("Reloading application to apply update...");
+                    window.location.reload();
+                  }}
+                  className="bg-[#5A6344] hover:bg-[#484f36] text-white text-xs font-black px-4.5 py-2.5 rounded-xl transition-all cursor-pointer shadow-xs hover:shadow-md flex items-center gap-1.5"
+                >
+                  <span>Actualizar Ahora ⚡</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPwaUpdateBanner(false)}
+                  className="text-xs font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  Más tarde
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

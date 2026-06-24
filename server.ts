@@ -153,6 +153,12 @@ app.post("/api/generate-plan", async (req, res) => {
 
 // Configure client asset routing
 async function init() {
+  // Avoid caching the service worker (sw.js) so updates are always detected instantly
+  app.get("/sw.js", (req, res, next) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    next();
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
