@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { WeeklyDayPlan, ExerciseItem, TodayWorkout, PalabraDeFe, PersonalFitnessPlan } from "./types";
 import { ROUTINES_BY_ROUTE_AND_DAY } from "./routines";
+import { WEEKLY_DIET_MENU_DB } from "./diets";
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, addDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -531,7 +532,15 @@ export default function App() {
   const [activeAdminTab, setActiveAdminTab] = useState<"socios" | "desafios" | "vistas">("socios");
 
   // Premium client tab
-  const [activeDashboardTab, setActiveDashboardTab] = useState<"plan" | "desafios" | "ranking">("plan");
+  const [activeDashboardTab, setActiveDashboardTab] = useState<"plan" | "desafios" | "ranking" | "alimentacion">("plan");
+
+  // Diet selection states
+  const [selectedDiet, setSelectedDiet] = useState<string>("diabeticos");
+  const [selectedDietDay, setSelectedDietDay] = useState<string>(() => {
+    const today = getSpanishDayName();
+    const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+    return days.includes(today) ? today : "Lunes";
+  });
 
   // Challenges States
   const [challengesList, setChallengesList] = useState<any[]>([]);
@@ -2229,10 +2238,21 @@ export default function App() {
                   >
                     🏆 Ranking
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDashboardTab("alimentacion")}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-3 text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none ${
+                      activeDashboardTab === "alimentacion"
+                        ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                        : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                    }`}
+                  >
+                    🍎 Alimentación
+                  </button>
                 </div>
 
                 {/* If typical trial user or standard paid user tries to access premium sections, show preeminent padlocked upsell card */}
-                {activeDashboardTab !== "plan" && user?.tipoCuenta !== "premium" && !isMasterUser(user) ? (
+                {activeDashboardTab !== "plan" && activeDashboardTab !== "alimentacion" && user?.tipoCuenta !== "premium" && !isMasterUser(user) ? (
                   <div className="bg-white rounded-3xl p-8 md:p-12 shadow-lg border border-[#D9D3C7] text-center max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300 my-8">
                     <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center text-3xl border border-amber-200 mx-auto animate-bounce">
                       ⭐
@@ -2540,6 +2560,262 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Main Client Nutrition Plan tab */}
+                {activeDashboardTab === "alimentacion" && (
+                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    {/* Header Banner */}
+                    <div className="bg-gradient-to-r from-[#5A6344] to-[#484f36] rounded-3xl p-6 md:p-8 text-white shadow-lg relative overflow-hidden">
+                      <span className="absolute top-2 right-4 text-9xl opacity-10 select-none font-serif font-bold italic">🍎</span>
+                      <div className="z-10 relative">
+                        <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#D9B99B] bg-white/10 px-3 py-1 rounded-full inline-block mb-3">
+                          ALIMENTACIÓN SALUDABLE Y CRISTIANA
+                        </span>
+                        <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[#FAF7F2]">
+                          Tu Templo en Nutrición
+                        </h2>
+                        <p className="text-sm text-white/90 italic mt-2 max-w-2xl">
+                          "Oye, hijo mío, y recibe mis razones, y se te multiplicarán años de vida. Por el camino de la sabiduría te he encaminado." — Proverbios 4:10-11
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Selector and Intro Layout */}
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                      {/* Left: Dropdown Selection Card */}
+                      <div className="lg:col-span-5 bg-white rounded-3xl p-6 border border-[#EBE6DE] shadow-xs space-y-6">
+                        <div>
+                          <label className="block text-xs font-black uppercase tracking-wider text-[#8B6E4E] mb-2">
+                            Selecciona tu Guía de Alimentación:
+                          </label>
+                          <div className="relative">
+                            <select
+                              value={selectedDiet}
+                              onChange={(e) => {
+                                setSelectedDiet(e.target.value);
+                                const today = getSpanishDayName();
+                                const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+                                setSelectedDietDay(days.includes(today) ? today : "Lunes");
+                              }}
+                              className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] text-slate-800 font-extrabold text-sm rounded-2xl p-4 pr-10 focus:outline-none focus:border-[#5A6344] transition-all cursor-pointer appearance-none"
+                            >
+                              <option value="diabeticos">🩸 Diabéticos (Control de Azúcar)</option>
+                              <option value="celiacos">🌾 Celíacos (Libre de Gluten)</option>
+                              <option value="hipertensos">🧂 Hipertensos (Bajo en Sodio)</option>
+                              <option value="muscular_oseo">🦴 Salud Ósea y Muscular (Calcio/Proteína)</option>
+                              <option value="digestivo">🥣 Salud Digestiva y Fácil Masticación</option>
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[#8B6E4E]">
+                              <ChevronRight className="w-5 h-5 rotate-90" />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quick Selection Buttons for Desktop */}
+                        <div className="hidden sm:block space-y-2">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Acceso Rápido:</span>
+                          <div className="grid grid-cols-1 gap-2">
+                            {Object.values(WEEKLY_DIET_MENU_DB).map((diet) => {
+                              const isSelected = selectedDiet === diet.id;
+                              let emoji = "🍎";
+                              if (diet.id === "diabeticos") emoji = "🩸";
+                              else if (diet.id === "celiacos") emoji = "🌾";
+                              else if (diet.id === "hipertensos") emoji = "🧂";
+                              else if (diet.id === "muscular_oseo") emoji = "🦴";
+                              else if (diet.id === "digestivo") emoji = "🥣";
+
+                              return (
+                                <button
+                                  key={diet.id}
+                                  onClick={() => {
+                                    setSelectedDiet(diet.id);
+                                    const today = getSpanishDayName();
+                                    const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+                                    setSelectedDietDay(days.includes(today) ? today : "Lunes");
+                                  }}
+                                  className={`w-full text-left px-4 py-3 rounded-xl border text-xs font-bold transition-all flex items-center gap-3 cursor-pointer ${
+                                    isSelected
+                                      ? "bg-[#5A6344]/10 border-[#5A6344] text-[#5A6344]"
+                                      : "bg-[#FAF7F2] border-[#EBE6DE] text-slate-600 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  <span className="text-base">{emoji}</span>
+                                  <span className="flex-1">{diet.nombre}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Medical caution banner */}
+                        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex gap-3">
+                          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                          <div className="text-xs text-[#5A4B3A] leading-relaxed">
+                            <span className="font-bold">Advertencia Médica Responsable: </span>
+                            {WEEKLY_DIET_MENU_DB[selectedDiet].cuidadoMedicina}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Selected Diet Description & Scripture Quote */}
+                      <div className="lg:col-span-7 bg-[#FAF7F2] rounded-3xl p-6 border border-[#EBE6DE] space-y-6 flex flex-col justify-between h-full">
+                        <div className="space-y-4">
+                          <h3 className="text-[#5A6344] font-black text-xl flex items-center gap-2">
+                            <span>{selectedDiet === "diabeticos" ? "🩸" : selectedDiet === "celiacos" ? "🌾" : selectedDiet === "hipertensos" ? "🧂" : selectedDiet === "muscular_oseo" ? "🦴" : "🥣"}</span>
+                            {WEEKLY_DIET_MENU_DB[selectedDiet].nombre}
+                          </h3>
+                          <p className="text-xs md:text-sm text-slate-700 leading-relaxed font-sans">
+                            {WEEKLY_DIET_MENU_DB[selectedDiet].descripcion}
+                          </p>
+                        </div>
+
+                        <hr className="border-[#EBE6DE]" />
+
+                        <div className="bg-white rounded-2xl p-4 border border-[#EBE6DE] relative overflow-hidden">
+                          <span className="absolute bottom-1 right-2 text-6xl opacity-5 select-none">🕊️</span>
+                          <span className="text-[9px] font-black uppercase tracking-wider text-[#8B6E4E] block mb-1">Sabiduría Bíblica</span>
+                          <blockquote className="font-serif italic text-xs md:text-sm text-[#5A4B3A] leading-relaxed">
+                            {WEEKLY_DIET_MENU_DB[selectedDiet].sabiduriaBiblica}
+                          </blockquote>
+                          <p className="text-[10px] text-slate-500 italic mt-2">
+                            {WEEKLY_DIET_MENU_DB[selectedDiet].consejoEspiritual}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Horizontal Weekday Switcher */}
+                    <div className="bg-white rounded-3xl p-4 border border-[#EBE6DE] shadow-xs">
+                      <div className="text-center mb-3">
+                        <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#8B6E4E] bg-[#FAF7F2] px-3 py-1 rounded-full border border-[#EBE6DE]">
+                          MENÚ DE 7 DÍAS
+                        </span>
+                      </div>
+                      <div className="flex flex-nowrap overflow-x-auto gap-2 pb-2 scrollbar-none">
+                        {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((day) => {
+                          const isSelected = selectedDietDay === day;
+                          const isToday = getSpanishDayName() === day;
+                          
+                          return (
+                            <button
+                              key={day}
+                              onClick={() => setSelectedDietDay(day)}
+                              className={`flex-1 min-w-[90px] py-3 px-2 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex flex-col items-center justify-center gap-1 border ${
+                                isSelected
+                                  ? "bg-[#5A6344] text-white border-[#5A6344] shadow-sm scale-[1.01]"
+                                  : "bg-[#FAF7F2] text-slate-600 border-[#EBE6DE] hover:bg-slate-100/70"
+                              }`}
+                            >
+                              <span>{day}</span>
+                              {isToday && (
+                                <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-black uppercase tracking-widest ${
+                                  isSelected ? "bg-white text-[#5A6344]" : "bg-red-500 text-white"
+                                }`}>
+                                  Hoy ❤️
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Selected Day Meals Grid */}
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 px-1">
+                        <Calendar className="w-5 h-5 text-[#5A6344]" />
+                        <h4 className="font-extrabold text-[#2D2A26] text-lg">
+                          Distribución de Comidas: <span className="text-[#8B6E4E]">{selectedDietDay}</span>
+                        </h4>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                        {/* Desayuno */}
+                        <div className="bg-white rounded-3xl p-5 border border-[#EBE6DE] shadow-2xs hover:shadow-xs transition-all flex flex-col justify-between space-y-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xl p-1.5 rounded-lg bg-amber-50 text-amber-600">🌅</span>
+                              <span className="text-xs font-black uppercase tracking-wider text-slate-400">08:00 AM</span>
+                            </div>
+                            <h5 className="font-black text-[#2D2A26] text-sm mb-2">Desayuno</h5>
+                            <p className="text-xs text-slate-600 leading-relaxed italic">
+                              "{WEEKLY_DIET_MENU_DB[selectedDiet].menuSemanal[selectedDietDay].desayuno}"
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Media Mañana */}
+                        <div className="bg-white rounded-3xl p-5 border border-[#EBE6DE] shadow-2xs hover:shadow-xs transition-all flex flex-col justify-between space-y-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xl p-1.5 rounded-lg bg-orange-50 text-orange-600">🍎</span>
+                              <span className="text-xs font-black uppercase tracking-wider text-slate-400">11:00 AM</span>
+                            </div>
+                            <h5 className="font-black text-[#2D2A26] text-sm mb-2">Media Mañana</h5>
+                            <p className="text-xs text-slate-600 leading-relaxed italic">
+                              "{WEEKLY_DIET_MENU_DB[selectedDiet].menuSemanal[selectedDietDay].mediaManana}"
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Almuerzo */}
+                        <div className="bg-white rounded-3xl p-5 border border-[#EBE6DE] shadow-2xs hover:shadow-xs transition-all flex flex-col justify-between space-y-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xl p-1.5 rounded-lg bg-[#5A6344]/10 text-[#5A6344]">🍲</span>
+                              <span className="text-xs font-black uppercase tracking-wider text-slate-400">02:00 PM</span>
+                            </div>
+                            <h5 className="font-black text-[#2D2A26] text-sm mb-2">Almuerzo</h5>
+                            <p className="text-xs text-slate-600 leading-relaxed italic">
+                              "{WEEKLY_DIET_MENU_DB[selectedDiet].menuSemanal[selectedDietDay].almuerzo}"
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Merienda */}
+                        <div className="bg-white rounded-3xl p-5 border border-[#EBE6DE] shadow-2xs hover:shadow-xs transition-all flex flex-col justify-between space-y-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xl p-1.5 rounded-lg bg-teal-50 text-teal-600">☕</span>
+                              <span className="text-xs font-black uppercase tracking-wider text-slate-400">05:30 PM</span>
+                            </div>
+                            <h5 className="font-black text-[#2D2A26] text-sm mb-2">Merienda</h5>
+                            <p className="text-xs text-slate-600 leading-relaxed italic">
+                              "{WEEKLY_DIET_MENU_DB[selectedDiet].menuSemanal[selectedDietDay].merienda}"
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Cena */}
+                        <div className="bg-white rounded-3xl p-5 border border-[#EBE6DE] shadow-2xs hover:shadow-xs transition-all flex flex-col justify-between space-y-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xl p-1.5 rounded-lg bg-indigo-50 text-indigo-600">🌙</span>
+                              <span className="text-xs font-black uppercase tracking-wider text-slate-400">08:30 PM</span>
+                            </div>
+                            <h5 className="font-black text-[#2D2A26] text-sm mb-2">Cena</h5>
+                            <p className="text-xs text-slate-600 leading-relaxed italic">
+                              "{WEEKLY_DIET_MENU_DB[selectedDiet].menuSemanal[selectedDietDay].cena}"
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Daily specific counsel/reminder bar */}
+                      <div className="p-4 bg-[#5A6344]/5 rounded-3xl border border-[#5A6344]/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">💡</span>
+                          <p className="text-xs text-slate-700 font-bold">
+                            Consejo Nutritivo para el {selectedDietDay}:
+                          </p>
+                        </div>
+                        <p className="text-xs text-slate-600 italic">
+                          {WEEKLY_DIET_MENU_DB[selectedDiet].menuSemanal[selectedDietDay].consejo}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Main Client Workout Route & Routine Plans ONLY shown when "plan" tab is selected */}
                 {activeDashboardTab === "plan" && (
                   <>
@@ -2616,8 +2892,8 @@ export default function App() {
             {/* BENTO GRID INTERACTIVE BODY */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
               
-              {/* SUB-SECTION 1: PLAN SEMANAL DE 7 DÍAS (Col Span: 4) */}
-              <section className="lg:col-span-4 bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE] flex flex-col justify-between">
+              {/* SUB-SECTION 1: PLAN SEMANAL DE 7 DÍAS (Col Span: 5) */}
+              <section className="lg:col-span-5 bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE] flex flex-col justify-between">
                 <div>
                   <h3 className="text-[#5A6344] font-bold text-lg mb-1 flex items-center gap-2">
                     <span className="text-xl">📅</span> SECCIÓN 1 — PLAN SEMANAL
@@ -2687,8 +2963,8 @@ export default function App() {
                 </div>
               </section>
 
-              {/* SUB-SECTION 2: HOY - EJERCICIOS PREVISIÓN (Col Span: 5) */}
-              <section className="lg:col-span-5 bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE] flex flex-col justify-between">
+              {/* SUB-SECTION 2: HOY - EJERCICIOS PREVISIÓN (Col Span: 7) */}
+              <section className="lg:col-span-7 bg-white rounded-3xl p-6 shadow-xs border border-[#EBE6DE] flex flex-col justify-between">
                 <div>
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-[#5A6344] font-bold text-lg flex items-center gap-2">
@@ -2763,44 +3039,7 @@ export default function App() {
                 </div>
               </section>
 
-              {/* SUB-SECTION 3: ALIMENTACIÓN INTEGRADA (Col Span: 3) */}
-              <section className="lg:col-span-3 bg-[#5A6344] rounded-3xl p-6 shadow-md text-white flex flex-col justify-between">
-                <div>
-                  <h3 className="font-bold text-lg mb-1 flex items-center gap-2 text-[#FAF7F2]">
-                    <span className="text-xl">🍎</span> SECCIÓN 3 — ALIMENTACIÓN
-                  </h3>
-                  <p className="text-xs text-white/70 mb-5 leading-snug">
-                    4 recomendaciones de alimentación fáciles e hidratación cotidiana para mayores:
-                  </p>
 
-                  <div className="space-y-4">
-                    {activePlan.recomendacionesAlimentacion.map((item, index) => {
-                      let iconChar = "💧";
-                      if (index === 1) iconChar = "🌾";
-                      else if (index === 2) iconChar = "🥗";
-                      else if (index === 3) iconChar = "⏳";
-                      
-                      return (
-                        <div key={index} className="flex gap-2.5 items-start">
-                          <span className="text-base leading-none p-1.5 rounded-lg bg-white/10 shrink-0">{iconChar}</span>
-                          <p className="text-xs text-white/90 leading-relaxed italic">
-                            {item}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="mt-8 pt-4 border-t border-white/10 text-center">
-                  <p className="text-[10px] text-[#D9B99B] font-bold tracking-widest uppercase">
-                    Sabiduría Cristiana
-                  </p>
-                  <p className="text-[11px] text-white/80 italic mt-0.5">
-                    "Glorificad a Dios en vuestro cuerpo y en vuestro espíritu"
-                  </p>
-                </div>
-              </section>
 
 
               {/* SUB-SECTION 4: PALABRA DE FE COMPLETA (Col Span: 12) */}
