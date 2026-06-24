@@ -39,17 +39,17 @@ import { db } from "./firebase";
 
 // PRE-DEFINED OFFLINE PROGRAMS (No AI API call needed, completely immediate & secure)
 const DEFAULT_EXERCISE_VIDEOS: Record<string, string> = {
-  "Sentarse y pararse con soporte de silla": "https://www.youtube.com/watch?v=2vY3G_mU0m0",
-  "Flexiones de pecho sobre la pared": "https://www.youtube.com/watch?v=a6YZb7Sqi9c",
-  "Elevación de talones afirmándote de la silla": "https://www.youtube.com/watch?v=8m9gO32D6z0",
-  "Círculos gigantes de hombros para aliviar tensión": "https://www.youtube.com/watch?v=K3f5K7p_k6w",
-  "Marcha sentados en silla levantando rodillas": "https://www.youtube.com/watch?v=VlS-2H09G-4",
-  "Rotación suave de tobillos": "https://www.youtube.com/watch?v=8vDqFmZq7t4",
-  "Apertura de pecho en cruz": "https://www.youtube.com/watch?v=uD9l7L_7pXo",
-  "Estiramiento suave de pantorrillas en pared": "https://www.youtube.com/watch?v=890rD_g2x9k",
-  "Sentadilla isométrica con apoyo de pared": "https://www.youtube.com/watch?v=y-wV4IpRviY",
-  "Elevación de brazos al cielo con libros ligeros": "https://www.youtube.com/watch?v=Kz69X2h0Wl0",
-  "Puntillas sostenidas": "https://www.youtube.com/watch?v=8m9gO32D6z0",
+  "Sentarse y pararse con soporte de silla": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/sentarse_silla.mp4",
+  "Flexiones de pecho sobre la pared": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/flexiones_pared.mp4",
+  "Elevación de talones afirmándote de la silla": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/elevacion_talones.mp4",
+  "Círculos gigantes de hombros para aliviar tensión": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/circulos_hombros.mp4",
+  "Marcha sentados en silla levantando rodillas": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/marcha_silla.mp4",
+  "Rotación suave de tobillos": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/rotacion_tobillos.mp4",
+  "Apertura de pecho en cruz": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/apertura_pecho.mp4",
+  "Estiramiento suave de pantorrillas en pared": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/estiramiento_pantorrillas.mp4",
+  "Sentadilla isométrica con apoyo de pared": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/sentadilla_isometrica.mp4",
+  "Elevación de brazos al cielo con libros ligeros": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/elevacion_brazos.mp4",
+  "Puntillas sostenidas": "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/elevacion_talones.mp4",
 };
 
 const getYoutubeEmbedUrl = (url: string): string | null => {
@@ -80,6 +80,74 @@ const getYoutubeEmbedUrl = (url: string): string | null => {
     return `https://www.youtube.com/embed/${fallbackMatch[1]}`;
   }
   return null;
+};
+
+interface VideoSource {
+  type: "youtube" | "raw" | "invalid";
+  url: string;
+}
+
+const getVideoSource = (url: string): VideoSource => {
+  if (!url) return { type: "invalid", url: "" };
+  const trimmed = url.trim();
+
+  // Try parsing as YouTube first
+  const youtubeEmbed = getYoutubeEmbedUrl(trimmed);
+  if (youtubeEmbed) {
+    return { type: "youtube", url: youtubeEmbed };
+  }
+
+  // Handle GitHub URLs or other direct video files
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    
+    if (host === "github.com" || host.endsWith(".github.com")) {
+      // Direct raw files on GitHub are served from raw.githubusercontent.com
+      // Pattern: https://github.com/owner/repo/blob/branch/path/video.mp4
+      // Target: https://raw.githubusercontent.com/owner/repo/branch/path/video.mp4
+      let rawUrl = trimmed;
+      const matchBlob = parsed.pathname.match(/^\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/);
+      if (matchBlob) {
+        const [_, owner, repo, branch, path] = matchBlob;
+        rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+      } else {
+        const matchRaw = parsed.pathname.match(/^\/([^\/]+)\/([^\/]+)\/raw\/([^\/]+)\/(.+)$/);
+        if (matchRaw) {
+          const [_, owner, repo, branch, path] = matchRaw;
+          rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+        } else {
+          // Fallback, just append ?raw=true
+          if (!parsed.searchParams.has("raw")) {
+            parsed.searchParams.set("raw", "true");
+            rawUrl = parsed.toString();
+          }
+        }
+      }
+      return { type: "raw", url: rawUrl };
+    }
+
+    if (host === "raw.githubusercontent.com") {
+      return { type: "raw", url: trimmed };
+    }
+
+    // Direct video formats
+    const ext = parsed.pathname.split(".").pop()?.toLowerCase() || "";
+    if (["mp4", "webm", "ogg", "mov", "m4v"].includes(ext)) {
+      return { type: "raw", url: trimmed };
+    }
+  } catch (e) {
+    const lower = trimmed.toLowerCase();
+    if (lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".ogg") || lower.endsWith(".mov")) {
+      return { type: "raw", url: trimmed };
+    }
+  }
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return { type: "raw", url: trimmed };
+  }
+
+  return { type: "invalid", url: "" };
 };
 
 const PROGRAM_SUPER_SUAVE: PersonalFitnessPlan = {
@@ -1243,7 +1311,7 @@ export default function App() {
   // Synchronize temp video url when exercise changes
   useEffect(() => {
     if (currentExercise) {
-      const customUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://www.youtube.com/watch?v=8BcPHWGguO4";
+      const customUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/sentarse_silla.mp4";
       setTempVideoUrl(customUrl);
       setIsEditingVideo(false);
     }
@@ -3339,7 +3407,7 @@ export default function App() {
                       onClick={() => {
                         setIsEditingVideo(!isEditingVideo);
                         if (!isEditingVideo) {
-                          const currentUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://www.youtube.com/watch?v=8BcPHWGguO4";
+                          const currentUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/sentarse_silla.mp4";
                           setTempVideoUrl(currentUrl);
                         }
                       }}
@@ -3352,14 +3420,14 @@ export default function App() {
                   {isEditingVideo ? (
                     <div className="p-4 bg-[#FAF7F2] rounded-2xl border border-[#D9B99B]/50 space-y-3 animate-in fade-in duration-200">
                       <label className="block text-[11px] font-bold text-slate-500 uppercase">
-                        Ingresa el enlace de YouTube para este ejercicio:
+                        Ingresa el enlace de GitHub (MP4) o YouTube para este ejercicio:
                       </label>
                       <div className="flex flex-col sm:flex-row gap-2">
                         <input
                           type="text"
                           value={tempVideoUrl}
                           onChange={(e) => setTempVideoUrl(e.target.value)}
-                          placeholder="Ej. https://www.youtube.com/watch?v=..."
+                          placeholder="Ej. https://github.com/maxnannij/.../video.mp4 o de YouTube..."
                           className="flex-1 bg-white border-2 border-[#EBE6DE] rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:border-[#5A6344]"
                         />
                         <button
@@ -3378,14 +3446,14 @@ export default function App() {
 
                   {/* Video Player Display */}
                   {(() => {
-                    const activeUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://www.youtube.com/watch?v=8BcPHWGguO4";
-                    const embedUrl = getYoutubeEmbedUrl(activeUrl);
+                    const activeUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://github.com/maxnannij/fuerte-en-cristo-videos/blob/main/sentarse_silla.mp4";
+                    const source = getVideoSource(activeUrl);
 
-                    if (embedUrl) {
+                    if (source.type === "youtube") {
                       return (
                         <div className="relative w-full aspect-video rounded-3xl overflow-hidden border border-[#EBE6DE] shadow-xs bg-black">
                           <iframe
-                            src={`${embedUrl}?modestbranding=1&rel=0`}
+                            src={`${source.url}?modestbranding=1&rel=0`}
                             title={`Video guía de ${currentExercise.nombre}`}
                             frameBorder="0"
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -3395,13 +3463,27 @@ export default function App() {
                           ></iframe>
                         </div>
                       );
+                    } else if (source.type === "raw") {
+                      return (
+                        <div className="relative w-full aspect-video rounded-3xl overflow-hidden border border-[#EBE6DE] shadow-xs bg-black">
+                          <video
+                            src={source.url}
+                            controls
+                            playsInline
+                            loop
+                            preload="metadata"
+                            className="absolute top-0 left-0 w-full h-full object-cover"
+                            title={`Video guía de ${currentExercise.nombre}`}
+                          />
+                        </div>
+                      );
                     } else {
                       return (
                         <div className="p-6 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl text-center space-y-1.5">
                           <span className="text-2xl block">⚠️</span>
                           <h5 className="font-bold text-xs text-slate-500">Enlace de video no válido</h5>
                           <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
-                            El enlace ingresado no es de YouTube o está vacío. Presiona "Colocar/Cambiar Video" arriba para ingresar un enlace correcto.
+                            El enlace ingresado no es un video directo de GitHub (MP4/WebM) ni un enlace de YouTube. Presiona "Colocar/Cambiar Video" arriba para ingresar un enlace correcto.
                           </p>
                         </div>
                       );
