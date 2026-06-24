@@ -38,6 +38,50 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, whe
 import { db } from "./firebase";
 
 // PRE-DEFINED OFFLINE PROGRAMS (No AI API call needed, completely immediate & secure)
+const DEFAULT_EXERCISE_VIDEOS: Record<string, string> = {
+  "Sentarse y pararse con soporte de silla": "https://www.youtube.com/watch?v=2vY3G_mU0m0",
+  "Flexiones de pecho sobre la pared": "https://www.youtube.com/watch?v=a6YZb7Sqi9c",
+  "Elevación de talones afirmándote de la silla": "https://www.youtube.com/watch?v=8m9gO32D6z0",
+  "Círculos gigantes de hombros para aliviar tensión": "https://www.youtube.com/watch?v=K3f5K7p_k6w",
+  "Marcha sentados en silla levantando rodillas": "https://www.youtube.com/watch?v=VlS-2H09G-4",
+  "Rotación suave de tobillos": "https://www.youtube.com/watch?v=8vDqFmZq7t4",
+  "Apertura de pecho en cruz": "https://www.youtube.com/watch?v=uD9l7L_7pXo",
+  "Estiramiento suave de pantorrillas en pared": "https://www.youtube.com/watch?v=890rD_g2x9k",
+  "Sentadilla isométrica con apoyo de pared": "https://www.youtube.com/watch?v=y-wV4IpRviY",
+  "Elevación de brazos al cielo con libros ligeros": "https://www.youtube.com/watch?v=Kz69X2h0Wl0",
+  "Puntillas sostenidas": "https://www.youtube.com/watch?v=8m9gO32D6z0",
+};
+
+const getYoutubeEmbedUrl = (url: string): string | null => {
+  if (!url) return null;
+  try {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    if (match && match[2] && match[2].length === 11) {
+      return `https://www.youtube.com/embed/${match[2]}`;
+    }
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("youtu.be")) {
+      return `https://www.youtube.com/embed/${parsed.pathname.substring(1)}`;
+    }
+    if (parsed.hostname.includes("youtube.com")) {
+      const v = parsed.searchParams.get("v");
+      if (v) return `https://www.youtube.com/embed/${v}`;
+      if (parsed.pathname.startsWith("/embed/")) {
+        return url;
+      }
+    }
+  } catch (e) {
+    // Ignore URL parse error, fallback below
+  }
+  
+  const fallbackMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
+  if (fallbackMatch && fallbackMatch[1]) {
+    return `https://www.youtube.com/embed/${fallbackMatch[1]}`;
+  }
+  return null;
+};
+
 const PROGRAM_SUPER_SUAVE: PersonalFitnessPlan = {
   planSemanal: [
     { dia: "Lunes", tipoActividad: "Movilidad en Silla", duracion_minutos: 15, descripcion: "Activación articular sentados para despertar con amor las articulaciones." },
@@ -535,7 +579,7 @@ export default function App() {
   const [activeDashboardTab, setActiveDashboardTab] = useState<"plan" | "desafios" | "ranking" | "alimentacion">("plan");
 
   // Diet selection states
-  const [selectedDiet, setSelectedDiet] = useState<string>("diabeticos");
+  const [selectedDiet, setSelectedDiet] = useState<string>("normal");
   const [selectedDietDay, setSelectedDietDay] = useState<string>(() => {
     const today = getSpanishDayName();
     const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
@@ -996,6 +1040,10 @@ export default function App() {
   const [restSeconds, setRestSeconds] = useState<number | null>(null);
   const [restTimerId, setRestTimerId] = useState<any>(null);
 
+  // Video guide states
+  const [isEditingVideo, setIsEditingVideo] = useState<boolean>(false);
+  const [tempVideoUrl, setTempVideoUrl] = useState<string>("");
+
   // Calculate missed days when user changes
   useEffect(() => {
     if (user) {
@@ -1142,6 +1190,35 @@ export default function App() {
     setCurrentScreen("player");
   };
 
+  const handleSaveExerciseVideo = async (exerciseName: string, newUrl: string) => {
+    const updatedVideos = {
+      ...(user?.exerciseVideos || {}),
+      [exerciseName]: newUrl,
+    };
+
+    const updatedUser = {
+      ...user,
+      exerciseVideos: updatedVideos,
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem("fiel_custom_user", JSON.stringify(updatedUser));
+
+    if (user && user.uid) {
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        await updateDoc(userDocRef, {
+          exerciseVideos: updatedVideos,
+          updatedAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.error("Error saving custom video url to Firestore:", err);
+      }
+    }
+    
+    setIsEditingVideo(false);
+  };
+
   const getTodayWorkout = (route: "suave" | "rodillas" | "fuerza" | "legendario", day: string): TodayWorkout => {
     return ROUTINES_BY_ROUTE_AND_DAY[route]?.[day] || activePlan.rutinaHoy;
   };
@@ -1149,6 +1226,15 @@ export default function App() {
   const currentWorkout = getTodayWorkout(selectedRouteType, selectedDay);
   const activeExercisesArray = currentWorkout.ejercicios;
   const currentExercise = activeExercisesArray[currentPlayerIndex] || activeExercisesArray[0];
+
+  // Synchronize temp video url when exercise changes
+  useEffect(() => {
+    if (currentExercise) {
+      const customUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://www.youtube.com/watch?v=8BcPHWGguO4";
+      setTempVideoUrl(customUrl);
+      setIsEditingVideo(false);
+    }
+  }, [currentPlayerIndex, currentExercise?.nombre, user?.exerciseVideos]);
 
   if (authLoading) {
     return (
@@ -2598,6 +2684,7 @@ export default function App() {
                               }}
                               className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] text-slate-800 font-extrabold text-sm rounded-2xl p-4 pr-10 focus:outline-none focus:border-[#5A6344] transition-all cursor-pointer appearance-none"
                             >
+                              <option value="normal">💪 Alimentación Balanceada (Normal)</option>
                               <option value="diabeticos">🩸 Diabéticos (Control de Azúcar)</option>
                               <option value="celiacos">🌾 Celíacos (Libre de Gluten)</option>
                               <option value="hipertensos">🧂 Hipertensos (Bajo en Sodio)</option>
@@ -2617,7 +2704,8 @@ export default function App() {
                             {Object.values(WEEKLY_DIET_MENU_DB).map((diet) => {
                               const isSelected = selectedDiet === diet.id;
                               let emoji = "🍎";
-                              if (diet.id === "diabeticos") emoji = "🩸";
+                              if (diet.id === "normal") emoji = "💪";
+                              else if (diet.id === "diabeticos") emoji = "🩸";
                               else if (diet.id === "celiacos") emoji = "🌾";
                               else if (diet.id === "hipertensos") emoji = "🧂";
                               else if (diet.id === "muscular_oseo") emoji = "🦴";
@@ -2660,7 +2748,7 @@ export default function App() {
                       <div className="lg:col-span-7 bg-[#FAF7F2] rounded-3xl p-6 border border-[#EBE6DE] space-y-6 flex flex-col justify-between h-full">
                         <div className="space-y-4">
                           <h3 className="text-[#5A6344] font-black text-xl flex items-center gap-2">
-                            <span>{selectedDiet === "diabeticos" ? "🩸" : selectedDiet === "celiacos" ? "🌾" : selectedDiet === "hipertensos" ? "🧂" : selectedDiet === "muscular_oseo" ? "🦴" : "🥣"}</span>
+                            <span>{selectedDiet === "normal" ? "💪" : selectedDiet === "diabeticos" ? "🩸" : selectedDiet === "celiacos" ? "🌾" : selectedDiet === "hipertensos" ? "🧂" : selectedDiet === "muscular_oseo" ? "🦴" : "🥣"}</span>
                             {WEEKLY_DIET_MENU_DB[selectedDiet].nombre}
                           </h3>
                           <p className="text-xs md:text-sm text-slate-700 leading-relaxed font-sans">
@@ -3224,6 +3312,88 @@ export default function App() {
                   <p className="text-base md:text-2xl text-slate-800 leading-relaxed font-serif font-medium">
                     "{currentExercise.instrucciones}"
                   </p>
+                </div>
+
+                {/* Dynamic Video Guide Container */}
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center px-1">
+                    <h4 className="text-xs uppercase tracking-widest font-extrabold text-[#8B6E4E] flex items-center gap-1.5">
+                      <span>📹</span> Video de Guía Práctica
+                    </h4>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingVideo(!isEditingVideo);
+                        if (!isEditingVideo) {
+                          const currentUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://www.youtube.com/watch?v=8BcPHWGguO4";
+                          setTempVideoUrl(currentUrl);
+                        }
+                      }}
+                      className="text-[11px] font-bold text-[#5A6344] hover:text-[#484f36] underline cursor-pointer flex items-center gap-1 focus:outline-none"
+                    >
+                      {isEditingVideo ? "❌ Cancelar" : "⚙️ Colocar/Cambiar Video"}
+                    </button>
+                  </div>
+
+                  {isEditingVideo ? (
+                    <div className="p-4 bg-[#FAF7F2] rounded-2xl border border-[#D9B99B]/50 space-y-3 animate-in fade-in duration-200">
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase">
+                        Ingresa el enlace de YouTube para este ejercicio:
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={tempVideoUrl}
+                          onChange={(e) => setTempVideoUrl(e.target.value)}
+                          placeholder="Ej. https://www.youtube.com/watch?v=..."
+                          className="flex-1 bg-white border-2 border-[#EBE6DE] rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:border-[#5A6344]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveExerciseVideo(currentExercise.nombre, tempVideoUrl)}
+                          className="bg-[#5A6344] hover:bg-[#484f36] text-[#FAF7F2] font-extrabold text-xs px-4 py-2 rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1"
+                        >
+                          <span className="text-xs">💾</span> Guardar Video
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        *Este video se guardará de forma personalizada para "{currentExercise.nombre}".
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {/* Video Player Display */}
+                  {(() => {
+                    const activeUrl = user?.exerciseVideos?.[currentExercise.nombre] || DEFAULT_EXERCISE_VIDEOS[currentExercise.nombre] || "https://www.youtube.com/watch?v=8BcPHWGguO4";
+                    const embedUrl = getYoutubeEmbedUrl(activeUrl);
+
+                    if (embedUrl) {
+                      return (
+                        <div className="relative w-full aspect-video rounded-3xl overflow-hidden border border-[#EBE6DE] shadow-xs bg-black">
+                          <iframe
+                            src={`${embedUrl}?modestbranding=1&rel=0`}
+                            title={`Video guía de ${currentExercise.nombre}`}
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowFullScreen
+                            className="absolute top-0 left-0 w-full h-full"
+                            referrerPolicy="no-referrer"
+                          ></iframe>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="p-6 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl text-center space-y-1.5">
+                          <span className="text-2xl block">⚠️</span>
+                          <h5 className="font-bold text-xs text-slate-500">Enlace de video no válido</h5>
+                          <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                            El enlace ingresado no es de YouTube o está vacío. Presiona "Colocar/Cambiar Video" arriba para ingresar un enlace correcto.
+                          </p>
+                        </div>
+                      );
+                    }
+                  })()}
                 </div>
 
                 {/* Visual support assistance reminder */}
