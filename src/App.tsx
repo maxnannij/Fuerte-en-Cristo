@@ -35,7 +35,54 @@ import { WeeklyDayPlan, ExerciseItem, TodayWorkout, PalabraDeFe, PersonalFitness
 import { ROUTINES_BY_ROUTE_AND_DAY } from "./routines";
 import { WEEKLY_DIET_MENU_DB } from "./diets";
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, addDoc, deleteDoc } from "firebase/firestore";
-import { db } from "./firebase";
+import { db, auth } from "./firebase";
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid || null,
+      email: auth.currentUser?.email || null,
+      emailVerified: auth.currentUser?.emailVerified || null,
+      isAnonymous: auth.currentUser?.isAnonymous || null,
+      tenantId: auth.currentUser?.tenantId || null,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 // PRE-DEFINED OFFLINE PROGRAMS (No AI API call needed, completely immediate & secure)
 const DEFAULT_EXERCISE_VIDEOS: Record<string, string> = {
@@ -578,6 +625,16 @@ export default function App() {
   const [addUserSuccess, setAddUserSuccess] = useState<string>("");
   const [addUserError, setAddUserError] = useState<string>("");
 
+  // States for awarding medals and trophies to users (Master view)
+  const [showAwardModal, setShowAwardModal] = useState<boolean>(false);
+  const [selectedUserForAward, setSelectedUserForAward] = useState<any | null>(null);
+  const [awardType, setAwardType] = useState<"gold_medal" | "silver_medal" | "bronze_medal" | "gold_trophy" | "silver_trophy" | "bronze_trophy">("gold_medal");
+  const [awardPoints, setAwardPoints] = useState<number>(20);
+  const [awardLegend, setAwardLegend] = useState<string>("");
+  const [isSubmittingAward, setIsSubmittingAward] = useState<boolean>(false);
+  const [awardSuccess, setAwardSuccess] = useState<string>("");
+  const [awardError, setAwardError] = useState<string>("");
+
   // States to keep track of the registered users list in Firestore for Max (Master) panel
   const [registeredUsersList, setRegisteredUsersList] = useState<any[]>([]);
   const [isLoadingUsersList, setIsLoadingUsersList] = useState<boolean>(false);
@@ -634,6 +691,88 @@ export default function App() {
     }
   };
 
+  const handleAwardPrize = async (
+    targetUserUid: string,
+    type: "gold_medal" | "silver_medal" | "bronze_medal" | "gold_trophy" | "silver_trophy" | "bronze_trophy",
+    points: number,
+    legend: string
+  ) => {
+    setIsSubmittingAward(true);
+    setAwardSuccess("");
+    setAwardError("");
+
+    try {
+      const userRef = doc(db, "users", targetUserUid);
+      
+      // Retrieve the current user document to get existing awards & points
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        throw new Error("El usuario no existe en la base de datos.");
+      }
+
+      const userData = userSnap.data();
+      const existingAwards = userData.awards || [];
+      const currentPoints = userData.puntosDesafio || 0;
+
+      const newAward = {
+        id: "award_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
+        type,
+        points,
+        legend: legend.trim() || "Por su excelente esfuerzo de fe",
+        date: Date.now(),
+        awardedBy: user?.userName || "Max / Nanni (Master)"
+      };
+
+      const updatedAwards = [newAward, ...existingAwards];
+      const updatedPoints = currentPoints + points;
+
+      await updateDoc(userRef, {
+        awards: updatedAwards,
+        puntosDesafio: updatedPoints,
+        updatedAt: serverTimestamp()
+      });
+
+      // Update in registered users list state
+      setRegisteredUsersList(prev => prev.map(u => {
+        if (u.uid === targetUserUid) {
+          return {
+            ...u,
+            awards: updatedAwards,
+            puntosDesafio: updatedPoints
+          };
+        }
+        return u;
+      }));
+
+      // If the rewarded user is the currently logged-in user, sync their state too!
+      if (user && user.uid === targetUserUid) {
+        const updatedSelf = {
+          ...user,
+          awards: updatedAwards,
+          puntosDesafio: updatedPoints
+        };
+        setUser(updatedSelf);
+        localStorage.setItem("fiel_custom_user", JSON.stringify(updatedSelf));
+      }
+
+      setAwardSuccess("¡PREMIO OTORGADO CON ÉXITO! El hermano ha recibido su premio y sumado sus puntos.");
+      setAwardLegend("");
+      
+      // Delay closing modal slightly for visual feedback
+      setTimeout(() => {
+        setShowAwardModal(false);
+        setAwardSuccess("");
+      }, 1800);
+
+    } catch (err: any) {
+      console.error("Error awarding prize:", err);
+      setAwardError("Error al otorgar premio: " + err.message);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUserUid}`);
+    } finally {
+      setIsSubmittingAward(false);
+    }
+  };
+
   const handleDeleteUser = async (userUid: string, uName: string) => {
     if (userUid === user?.uid) {
       alert("No puedes borrar tu propio usuario de administrador. ¡Es tu llave de acceso!");
@@ -657,7 +796,13 @@ export default function App() {
   const [activeAdminTab, setActiveAdminTab] = useState<"socios" | "desafios" | "vistas">("socios");
 
   // Premium client tab
-  const [activeDashboardTab, setActiveDashboardTab] = useState<"plan" | "desafios" | "ranking" | "alimentacion">("plan");
+  const [activeDashboardTab, setActiveDashboardTab] = useState<"plan" | "desafios" | "ranking" | "alimentacion" | "vitrina">("plan");
+
+  // Expanded categories state for the Trophies and Medals Showcase (Vitrina)
+  const [expandedAwardCategories, setExpandedAwardCategories] = useState<Record<string, boolean>>({
+    gold_medal: true, // Default open the first one for neat visual onboarding!
+    gold_trophy: true
+  });
 
   // Diet selection states
   const [selectedDiet, setSelectedDiet] = useState<string>("normal");
@@ -2088,6 +2233,24 @@ export default function App() {
                                         </button>
                                       </div>
                                     </div>
+
+                                    {/* Action to award trophy or medal */}
+                                    <div className="border-t border-slate-200/50 pt-3 mt-3">
+                                      <span className="block text-[10px] uppercase font-extrabold text-slate-400 tracking-wider mb-2">Vitrina de Premios:</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedUserForAward(row);
+                                          setAwardType("gold_medal");
+                                          setAwardPoints(25);
+                                          setAwardLegend("");
+                                          setShowAwardModal(true);
+                                        }}
+                                        className="w-full py-2 px-3 text-[11px] font-black uppercase rounded-xl border border-[#D9B99B]/60 bg-[#FAF7F2] text-[#8B6E4E] hover:bg-[#8B6E4E] hover:text-white hover:border-[#8B6E4E] transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-3xs"
+                                      >
+                                        <span>🏅 Otorgar Medalla / Trofeo</span>
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
 
@@ -2370,56 +2533,67 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Visual Tab Bar Selector for All Customers (Premium features active for pago/max, teased for trial) */}
-                <div className="flex bg-white p-1 rounded-2xl border border-[#D9D3C7] shadow-xs max-w-xl mx-auto gap-1 mb-8 animate-in fade-in duration-300">
-                  <button
-                    type="button"
-                    onClick={() => setActiveDashboardTab("plan")}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-3 text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none ${
-                      activeDashboardTab === "plan"
-                        ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
-                        : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
-                    }`}
-                  >
-                    📖 Mi Plan
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDashboardTab("desafios")}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-3 text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none ${
-                      activeDashboardTab === "desafios"
-                        ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
-                        : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
-                    }`}
-                  >
-                    ⚔️ Desafíos
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDashboardTab("ranking")}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-3 text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none ${
-                      activeDashboardTab === "ranking"
-                        ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
-                        : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
-                    }`}
-                  >
-                    🏆 Ranking
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDashboardTab("alimentacion")}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-3 text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none ${
-                      activeDashboardTab === "alimentacion"
-                        ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
-                        : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
-                    }`}
-                  >
-                    🍎 Alimentación
-                  </button>
-                </div>
+                 {/* Visual Tab Bar Selector for All Customers (Premium features active for pago/max, teased for trial) */}
+                 <div className="flex bg-white p-1 rounded-2xl border border-[#D9D3C7] shadow-xs max-w-2xl mx-auto gap-1 mb-8 animate-in fade-in duration-300 overflow-x-auto scrollbar-none">
+                   <button
+                     type="button"
+                     onClick={() => setActiveDashboardTab("plan")}
+                     className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 text-[10px] sm:text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
+                       activeDashboardTab === "plan"
+                         ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                         : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                     }`}
+                   >
+                     📖 Mi Plan
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => setActiveDashboardTab("desafios")}
+                     className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 text-[10px] sm:text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
+                       activeDashboardTab === "desafios"
+                         ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                         : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                     }`}
+                   >
+                     ⚔️ Desafíos
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => setActiveDashboardTab("ranking")}
+                     className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 text-[10px] sm:text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
+                       activeDashboardTab === "ranking"
+                         ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                         : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                     }`}
+                   >
+                     🏆 Ranking
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => setActiveDashboardTab("vitrina")}
+                     className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 text-[10px] sm:text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
+                       activeDashboardTab === "vitrina"
+                         ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                         : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                     }`}
+                   >
+                     🏅 Vitrina
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => setActiveDashboardTab("alimentacion")}
+                     className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 text-[10px] sm:text-xs md:text-sm font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
+                       activeDashboardTab === "alimentacion"
+                         ? "bg-[#5A6344] text-[#FAF7F2] shadow-sm"
+                         : "text-slate-500 hover:text-[#5A6344] hover:bg-slate-50"
+                     }`}
+                   >
+                     🍎 Alimentación
+                   </button>
+                 </div>
 
-                {/* If typical trial user or standard paid user tries to access premium sections, show preeminent padlocked upsell card */}
-                {activeDashboardTab !== "plan" && activeDashboardTab !== "alimentacion" && user?.tipoCuenta !== "premium" && !isMasterUser(user) ? (
+                 {/* If typical trial user or standard paid user tries to access premium sections, show preeminent padlocked upsell card */}
+                 {activeDashboardTab !== "plan" && activeDashboardTab !== "alimentacion" && activeDashboardTab !== "vitrina" && user?.tipoCuenta !== "premium" && !isMasterUser(user) ? (
                   <div className="bg-white rounded-3xl p-8 md:p-12 shadow-lg border border-[#D9D3C7] text-center max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300 my-8">
                     <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center text-3xl border border-amber-200 mx-auto animate-bounce">
                       ⭐
@@ -2722,6 +2896,249 @@ export default function App() {
                             })()}
                           </tbody>
                         </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ----------------- CLIENT SHOWCASE (VITRINA DE TROFEOS Y MEDALLAS) TAB ----------------- */}
+                {activeDashboardTab === "vitrina" && (
+                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    {/* Header Banner */}
+                    <div className="bg-gradient-to-r from-[#8B6E4E] to-[#725a3f] rounded-3xl p-6 md:p-8 text-white shadow-lg relative overflow-hidden">
+                      <span className="absolute top-2 right-4 text-9xl opacity-10 select-none font-serif font-bold italic">🏅</span>
+                      <div className="z-10 relative">
+                        <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#FAF7F2] bg-white/10 px-3 py-1 rounded-full inline-block mb-3">
+                          VITRINA DE PREMIOS Y RECONOCIMIENTOS
+                        </span>
+                        <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[#FAF7F2]">
+                          Tus Trofeos y Medallas de Fe
+                        </h2>
+                        <p className="text-sm text-[#FAF7F2]/90 italic mt-2 max-w-2xl">
+                          "He peleado la buena batalla, he acabado la carrera, he guardado la fe. Por lo demás, me está guardada la corona de justicia..." — 2 Timoteo 4:7-8
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Stats Counter Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      {/* Points Card */}
+                      <div className="bg-white rounded-2xl p-5 border border-[#EBE6DE] flex items-center gap-4 shadow-3xs">
+                        <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shrink-0">
+                          🪙
+                        </div>
+                        <div>
+                          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Puntos de Desafío</span>
+                          <span className="text-xl font-black text-slate-800">{user?.puntosDesafio || 0} <span className="text-xs font-bold text-slate-400">pts</span></span>
+                        </div>
+                      </div>
+
+                      {/* Medals Count Card */}
+                      <div className="bg-white rounded-2xl p-5 border border-[#EBE6DE] flex items-center gap-4 shadow-3xs">
+                        <div className="w-12 h-12 rounded-xl bg-yellow-50 border border-yellow-200 flex items-center justify-center text-2xl shrink-0">
+                          🏅
+                        </div>
+                        <div>
+                          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Medallas</span>
+                          <span className="text-xl font-black text-slate-800">
+                            {(() => {
+                              const list = user?.awards || [];
+                              const medalsCount = list.filter((a: any) => a.type.includes("medal")).length;
+                              return medalsCount;
+                            })()}{" "}
+                            <span className="text-xs font-bold text-slate-400">recibidas</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Trophies Count Card */}
+                      <div className="bg-white rounded-2xl p-5 border border-[#EBE6DE] flex items-center gap-4 shadow-3xs">
+                        <div className="w-12 h-12 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-2xl shrink-0">
+                          🏆
+                        </div>
+                        <div>
+                          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Trofeos</span>
+                          <span className="text-xl font-black text-slate-800">
+                            {(() => {
+                              const list = user?.awards || [];
+                              const trophiesCount = list.filter((a: any) => a.type.includes("trophy")).length;
+                              return trophiesCount;
+                            })()}{" "}
+                            <span className="text-xs font-bold text-slate-400">logrados</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded Interactive Showcase Section */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-extrabold text-[#5A6344] text-xs uppercase tracking-widest">
+                          Tus Reconocimientos Detallados
+                        </h3>
+                        <span className="text-[10px] text-slate-400 font-semibold italic">
+                          Toca una categoría para ver los detalles y motivos
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* CATEGORY LIST CONFIG */}
+                        {[
+                          {
+                            key: "gold_medal",
+                            title: "Medallas de Oro",
+                            emoji: "🥇",
+                            colorClass: "from-amber-100 to-yellow-200 border-amber-300",
+                            textColorClass: "text-amber-800",
+                            badgeBg: "bg-amber-500",
+                            desc: "Reconocimiento de máxima excelencia, perseverancia continua y desafíos superados de manera perfecta."
+                          },
+                          {
+                            key: "silver_medal",
+                            title: "Medallas de Plata",
+                            emoji: "🥈",
+                            colorClass: "from-slate-100 to-gray-200 border-slate-300",
+                            textColorClass: "text-slate-800",
+                            badgeBg: "bg-slate-400",
+                            desc: "Premio al esfuerzo destacado, constancia y completar las rutinas con espíritu excelente."
+                          },
+                          {
+                            key: "bronze_medal",
+                            title: "Medallas de Bronce",
+                            emoji: "🥉",
+                            colorClass: "from-orange-100 to-amber-200 border-orange-300",
+                            textColorClass: "text-orange-900",
+                            badgeBg: "bg-orange-500",
+                            desc: "Premio por participación entusiasta, dar los primeros pasos de fe y constancia inicial."
+                          },
+                          {
+                            key: "gold_trophy",
+                            title: "Trofeos de Oro",
+                            emoji: "🏆🥇",
+                            colorClass: "from-yellow-100 to-amber-200 border-yellow-300",
+                            textColorClass: "text-yellow-900",
+                            badgeBg: "bg-yellow-500",
+                            desc: "Trofeo mayor otorgado por el liderazgo en la fe, finalización de senderos completos o grandes hazañas de superación."
+                          },
+                          {
+                            key: "silver_trophy",
+                            title: "Trofeos de Plata",
+                            emoji: "🏆🥈",
+                            colorClass: "from-slate-100 to-zinc-200 border-slate-300",
+                            textColorClass: "text-zinc-800",
+                            badgeBg: "bg-zinc-400",
+                            desc: "Reconocimiento especial por constancia fraternal, apoyo a la comunidad y avance en tus desafíos de fe."
+                          },
+                          {
+                            key: "bronze_trophy",
+                            title: "Trofeos de Bronce",
+                            emoji: "🏆🥉",
+                            colorClass: "from-amber-100 to-orange-200 border-amber-300",
+                            textColorClass: "text-amber-900",
+                            badgeBg: "bg-amber-600",
+                            desc: "Trofeo de entrada por sumarse activamente a los desafíos semanales y participar en la hermandad."
+                          }
+                        ].map((category) => {
+                          const awardsList = user?.awards || [];
+                          const categoryAwards = awardsList.filter((a: any) => a.type === category.key);
+                          const totalCount = categoryAwards.length;
+                          const isOpen = expandedAwardCategories[category.key];
+
+                          return (
+                            <div 
+                              key={category.key} 
+                              className={`bg-white rounded-3xl border border-[#EBE6DE] overflow-hidden shadow-3xs transition-all duration-300 ${
+                                totalCount === 0 ? "opacity-75" : ""
+                              }`}
+                            >
+                              {/* Header (Expandable toggle) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setExpandedAwardCategories(prev => ({
+                                    ...prev,
+                                    [category.key]: !prev[category.key]
+                                  }));
+                                }}
+                                className="w-full text-left p-5 flex items-center justify-between bg-gradient-to-b from-white to-[#FAF7F2]/40 hover:to-[#FAF7F2] transition-all focus:outline-none cursor-pointer select-none"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${category.colorClass} flex items-center justify-center text-2xl shadow-3xs shrink-0`}>
+                                    {category.emoji}
+                                  </div>
+                                  <div>
+                                    <h4 className="font-extrabold text-sm text-slate-800 uppercase tracking-wide flex items-center gap-2">
+                                      <span>{category.title}</span>
+                                      <span className={`${category.textColorClass} font-black`}>({totalCount})</span>
+                                    </h4>
+                                    <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">
+                                      {totalCount === 0 ? "Aún no obtenido" : `${totalCount} ${totalCount === 1 ? "premio recibido" : "premios recibidos"}`}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {totalCount > 0 && (
+                                    <span className={`text-[10px] px-2.5 py-0.5 text-white font-extrabold rounded-full ${category.badgeBg}`}>
+                                      Logrado
+                                    </span>
+                                  )}
+                                  {isOpen ? (
+                                    <ChevronLeft className="w-4 h-4 text-slate-400 rotate-90 transition-transform" />
+                                  ) : (
+                                    <ChevronRight className="w-4 h-4 text-slate-400 transition-transform" />
+                                  )}
+                                </div>
+                              </button>
+
+                              {/* Foldout contents */}
+                              {isOpen && (
+                                <div className="p-5 border-t border-[#EBE6DE] bg-slate-50/50 space-y-3 animate-in slide-in-from-top-1.5 duration-150">
+                                  <p className="text-[11px] text-slate-500 font-medium leading-relaxed italic border-b border-dashed border-slate-200 pb-2.5">
+                                    {category.desc}
+                                  </p>
+
+                                  {totalCount === 0 ? (
+                                    <div className="py-6 text-center">
+                                      <span className="text-xl block filter grayscale opacity-40 mb-1">🔒</span>
+                                      <p className="text-[11px] text-slate-400 font-bold">Aún no has recibido este galardón de fe.</p>
+                                      <p className="text-[9px] text-slate-400/95 max-w-xs mx-auto mt-0.5">Participa activamente en tus senderos y desafíos para que los instructores te premien.</p>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-3.5">
+                                      {categoryAwards.map((aw: any, awIdx: number) => (
+                                        <div 
+                                          key={aw.id || awIdx}
+                                          className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-3xs hover:border-slate-300 transition-colors space-y-2"
+                                        >
+                                          <div className="flex justify-between items-start gap-2">
+                                            <span className="text-[10px] font-extrabold text-[#8B6E4E] bg-[#FAF7F2] border border-[#D9B99B]/40 px-2 py-0.5 rounded-md uppercase tracking-wide">
+                                              🪙 +{aw.points} pts de desafío
+                                            </span>
+                                            <span className="text-[9px] text-slate-400 font-mono">
+                                              {new Date(aw.date).toLocaleDateString()}
+                                            </span>
+                                          </div>
+                                          
+                                          <p className="text-xs text-slate-700 font-bold bg-[#FAF7F2]/40 p-2.5 rounded-xl border border-slate-100 leading-relaxed">
+                                            "{aw.legend}"
+                                          </p>
+
+                                          <div className="text-[10px] text-slate-400 font-semibold flex justify-between items-center pt-0.5">
+                                            <span>Por: <strong className="text-slate-600">{aw.awardedBy}</strong></span>
+                                            <span className="text-[9px] text-emerald-600 font-extrabold uppercase tracking-wide flex items-center gap-0.5">
+                                              <CheckCircle2 className="w-3 h-3" /> Verificado
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -3842,6 +4259,149 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowAddUserModal(false)}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  Cerrar ventana
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- MASTER: OTORGAR MEDALLA / TROFEO MODAL ----------------- */}
+      {showAwardModal && selectedUserForAward && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-[#EBE6DE] animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🏅</span>
+                <h3 className="text-lg md:text-xl font-extrabold text-[#5A6344]">Otorgar Premio de Fe</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAwardModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold p-1 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                title="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+              Estás premiando al hermano/a <strong className="text-slate-700 font-bold">{selectedUserForAward.userName}</strong>. Selecciona el tipo de reconocimiento, los puntos espirituales de recompensa y escribe una leyenda para su vitrina de trofeos.
+            </p>
+
+            {awardSuccess && (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-2xl mb-4 leading-relaxed font-semibold">
+                {awardSuccess}
+              </div>
+            )}
+
+            {awardError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-2xl mb-4 leading-relaxed font-semibold">
+                {awardError}
+              </div>
+            )}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleAwardPrize(selectedUserForAward.uid, awardType, awardPoints, awardLegend);
+              }}
+              className="space-y-4"
+            >
+              {/* Tipo de premio */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1.5">
+                  1. Tipo de Premio / Reconocimiento:
+                </label>
+                <select
+                  value={awardType}
+                  onChange={(e) => setAwardType(e.target.value as any)}
+                  className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-[#5A6344] focus:ring-1 focus:ring-[#5A6344]"
+                >
+                  <option value="gold_medal">🥇 Medalla de Oro</option>
+                  <option value="silver_medal">🥈 Medalla de Plata</option>
+                  <option value="bronze_medal">🥉 Medalla de Bronce</option>
+                  <option value="gold_trophy">🏆🥇 Trofeo de Oro</option>
+                  <option value="silver_trophy">🏆🥈 Trofeo de Plata</option>
+                  <option value="bronze_trophy">🏆🥉 Trofeo de Bronce</option>
+                </select>
+              </div>
+
+              {/* Puntos del premio */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1.5">
+                  2. Puntos de Desafío que otorga:
+                </label>
+                <div className="flex gap-2 mb-2">
+                  {[10, 25, 50, 100].map((pts) => (
+                    <button
+                      key={pts}
+                      type="button"
+                      onClick={() => setAwardPoints(pts)}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                        awardPoints === pts
+                          ? "bg-[#5A6344] text-white border-[#5A6344]"
+                          : "bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300"
+                      }`}
+                    >
+                      +{pts} pts
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  required
+                  min={1}
+                  max={1000}
+                  value={awardPoints}
+                  onChange={(e) => setAwardPoints(Math.max(1, parseInt(e.target.value) || 0))}
+                  className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#5A6344] focus:ring-1 focus:ring-[#5A6344]"
+                />
+              </div>
+
+              {/* Leyenda / Motivo */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 tracking-wider uppercase mb-1.5">
+                  3. Leyenda o Motivo del premio:
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  maxLength={120}
+                  placeholder="Ej. por completar el desafío de fe X, por participar con excelente esfuerzo en la rutina..."
+                  value={awardLegend}
+                  onChange={(e) => setAwardLegend(e.target.value)}
+                  className="w-full bg-[#FAF7F2] border-2 border-[#EBE6DE] rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#5A6344] focus:ring-1 focus:ring-[#5A6344]"
+                />
+                <span className="text-[10px] text-slate-400 block mt-1">Sé claro y motivador. El hermano verá este mensaje exacto en su vitrina de fe.</span>
+              </div>
+
+              <div className="pt-3">
+                <button
+                  type="submit"
+                  disabled={isSubmittingAward}
+                  className="w-full bg-[#8B6E4E] hover:bg-[#725a3f] disabled:bg-slate-300 text-white font-extrabold text-sm py-3 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isSubmittingAward ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Otorgando Premio de Fe...</span>
+                    </>
+                  ) : (
+                    <span>Entregar Premio Espiritual ⚡</span>
+                  )}
+                </button>
+              </div>
+
+              <div className="text-center mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAwardModal(false)}
                   className="text-xs text-slate-400 hover:text-slate-600 underline"
                 >
                   Cerrar ventana

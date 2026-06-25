@@ -30,6 +30,14 @@
               "type": "map",
               "description": "Ejercicios marcados como completados por el hermano en cada día."
             },
+            "puntosDesafio": {
+              "type": "integer",
+              "description": "Puntos de desafío acumulados por recibir premios o superar retos."
+            },
+            "awards": {
+              "type": "array",
+              "description": "Lista de trofeos y medallas otorgados por los administradores."
+            },
             "updatedAt": {
               "type": "timestamp",
               "description": "Última fecha de actualización de datos."
