@@ -2841,6 +2841,7 @@ export default function App() {
                               <th className="py-3 px-3">Lugar</th>
                               <th className="py-3 px-3">Hermano/a</th>
                               <th className="py-3 px-3 text-center">Racha Actual 🔥</th>
+                              <th className="py-3 px-3 text-center">Puntos Desafío 🪙</th>
                               <th className="py-3 px-3 text-right">Desafíos Superados ⚔️</th>
                             </tr>
                           </thead>
@@ -2848,6 +2849,10 @@ export default function App() {
                             {(() => {
                               const rankingUsers = [...registeredUsersList];
                               rankingUsers.sort((a, b) => {
+                                const pointsA = a.puntosDesafio || 0;
+                                const pointsB = b.puntosDesafio || 0;
+                                if (pointsB !== pointsA) return pointsB - pointsA;
+                                
                                 const countA = a.desafiosSuperadosCount || 0;
                                 const countB = b.desafiosSuperadosCount || 0;
                                 if (countB !== countA) return countB - countA;
@@ -2886,6 +2891,9 @@ export default function App() {
                                     </td>
                                     <td className="py-3.5 px-3 text-center text-amber-600 font-extrabold text-sm">
                                       🔥 {u.rachaDias || 0} {u.rachaDias === 1 ? "día" : "días"}
+                                    </td>
+                                    <td className="py-3.5 px-3 text-center text-amber-800 font-black text-sm">
+                                      🪙 {u.puntosDesafio || 0} pts
                                     </td>
                                     <td className="py-3.5 px-3 text-right text-emerald-700 font-extrabold text-sm">
                                       ⚔️ {u.desafiosSuperadosCount || 0} completados
